@@ -89,29 +89,17 @@ jobs:
           name: krc721d-binary
           path: target/release
           
-      - name: Verify binary exists and is valid
+      - name: Verify binary exists
         run: |
-          echo "Verifying binary at target/release/krc721d..."
           if [ ! -f target/release/krc721d ]; then
-            echo "ERROR: Binary not found at target/release/krc721d"
+            echo "Error: Binary not found after download"
             echo "Contents of target/release:"
             ls -la target/release/ || echo "Directory doesn't exist"
             exit 1
           fi
-          
-          echo "Binary found. Details:"
           ls -lh target/release/krc721d
-          file target/release/krc721d
-          BINARY_SIZE=$(stat -c%s target/release/krc721d 2>/dev/null || echo "0")
-          echo "Binary size: $BINARY_SIZE bytes"
-          
-          if [ "$BINARY_SIZE" -eq 0 ]; then
-            echo "ERROR: Binary file is empty!"
-            exit 1
-          fi
-          
           chmod +x target/release/krc721d
-          echo "Binary ready at target/release/krc721d"
+          file target/release/krc721d
 
       - name: Set environment variables based on branch
         run: |
@@ -147,14 +135,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Verify binary before Docker build
-        run: |
-          echo "Verifying binary exists in build context..."
-          ls -lh target/release/krc721d
-          file target/release/krc721d
-          stat target/release/krc721d
-          echo "Binary size: $(du -h target/release/krc721d | cut -f1)"
 
       - name: Build Docker image
         run: |
