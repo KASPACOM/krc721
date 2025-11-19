@@ -80,45 +80,23 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Create target directory
+        run: mkdir -p target/release
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
         with:
-          toolchain: stable
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            ${{ runner.os }}-cargo-
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libssl-dev \
-            pkg-config \
-            protobuf-compiler \
-            libprotobuf-dev \
-            clang \
-            libclang-dev
-
-      - name: Build Release binary
-        env:
-          CARGO_NET_GIT_FETCH_WITH_CLI: true
-          CARGO_INCREMENTAL: 0
-        run: cargo build --release --bin krc721d
+          name: krc721d-binary
+          path: target/release
           
       - name: Verify binary exists
         run: |
+          if [ ! -f target/release/krc721d ]; then
+            echo "Error: Binary not found after download"
+            echo "Contents of target/release:"
+            ls -la target/release/ || echo "Directory doesn't exist"
+            exit 1
+          fi
           ls -lh target/release/krc721d
           chmod +x target/release/krc721d
           file target/release/krc721d
