@@ -80,11 +80,26 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v4
 
+      - name: Create target directory
+        run: mkdir -p target/release
+
       - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
           name: krc721d-binary
-          path: target/release/
+          path: target/release
+          
+      - name: Verify binary exists
+        run: |
+          if [ ! -f target/release/krc721d ]; then
+            echo "Error: Binary not found after download"
+            echo "Contents of target/release:"
+            ls -la target/release/ || echo "Directory doesn't exist"
+            exit 1
+          fi
+          ls -lh target/release/krc721d
+          chmod +x target/release/krc721d
+          file target/release/krc721d
 
       - name: Set environment variables based on branch
         run: |
