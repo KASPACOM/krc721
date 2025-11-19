@@ -1,0 +1,30 @@
+[package]
+name = "krc721-kaspad"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rusty Kaspa Daemon Manager for KRC-721"
+
+[features]
+default = []
+
+[dependencies]
+krc721-core.workspace = true
+kaspa-core.workspace = true
+kaspad.workspace = true
+
+workflow-core.workspace = true
+
+async-trait.workspace = true
+ahash.workspace = true
+cfg-if.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rlimit.workspace = true
+nix.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true

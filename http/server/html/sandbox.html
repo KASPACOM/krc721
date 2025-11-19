@@ -1,0 +1,264 @@
+<html>
+<head>
+    <title>Kaspa KRC-721 indexer</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:wght@100..900&family=Roboto:ital,wght@0,100..900;1,100..900&family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+        * {
+            font-family: Ubuntu Mono, Consolas, Monaco, monospace;
+            font-size: 18px;
+        }
+        .endpoint-section {
+            margin: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        .url-preview {
+            color: #072c42;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .url-description {
+            background-color: #f0f0f0;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 3px;
+        }
+        input[type="text"] {
+            padding: 5px;
+            margin: 5px;
+            width: 200px;
+        }
+        button {
+            padding: 5px 15px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .json-response {
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid black;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        span.number {
+            color: rgb(11, 103, 20);
+        }
+
+        span.key {
+            color: rgb(22, 32, 110);
+        }
+
+        span.string {
+            color: rgb(16, 115, 105);
+        }
+
+        span.boolean {
+            color: rgb(91, 9, 0);
+        }
+
+        span.keyword {
+            color: rgb(2, 83, 67);
+        }
+        a {
+            color: rgb(13, 113, 95);
+            text-decoration: none;
+        }
+        a:hover {
+            color: rgb(13, 62, 53);
+        }
+    </style>
+</head>
+<body>
+    <span>
+        Kaspa KRC-721 Indexer 
+        v{{version}}
+        <span style="color: #555555;">∙</span>
+        <a href="/">Home</a>
+        <span style="color: #555555;">∙</span>
+        <a href="/docs" target="_blank">Documentation</a>
+    </span>
+    <br/>
+    <div id="endpoints-container"></div>
+
+    <script>
+        // Define all API endpoints
+        const endpoints = [
+            "/api/v1/krc721/{{network}}/status",
+            "/api/v1/krc721/{{network}}/nfts",
+            "/api/v1/krc721/{{network}}/nfts/:tick",
+            "/api/v1/krc721/{{network}}/nfts/:tick/:id",
+            "/api/v1/krc721/{{network}}/owners/:tick",
+            "/api/v1/krc721/{{network}}/address/:address",
+            "/api/v1/krc721/{{network}}/address/:address/:tick",
+            "/api/v1/krc721/{{network}}/royalties/:address/:tick",
+            "/api/v1/krc721/{{network}}/deployments",
+            "/api/v1/krc721/{{network}}/ops",
+            "/api/v1/krc721/{{network}}/ops/score/:id",
+            "/api/v1/krc721/{{network}}/ops/txid/:txid",
+            "/api/v1/krc721/{{network}}/rejections/txid/:txid",
+            "/api/v1/krc721/{{network}}/reserved",
+            "/api/v1/krc721/{{network}}/history/:tick/:id",
+            "/api/v1/krc721/{{network}}/ranges/:tick",
+        ];
+
+        let paginatedSuffixes = ["nfts", "owners/:tick", ":address", ":address/:tick", "ops", "deployments", "history/:tick/:id"];
+
+        function createEndpointSection(url) {
+
+            const isPaginated = paginatedSuffixes.some(suffix => url.endsWith(suffix));
+
+            const section = document.createElement('div');
+            section.className = 'endpoint-section';
+
+            // Extract parameters from URL
+            const params = url.match(/:[a-zA-Z]+/g) || [];
+            const previewId = `preview-${Math.random().toString(36).substr(2, 9)}`;
+            const descriptionId = `description-${Math.random().toString(36).substr(2, 9)}`;
+            // Add URL preview
+            const description = document.createElement('div');
+            description.id = descriptionId;
+            description.className = 'url-description';
+            description.textContent = url;
+            section.appendChild(description);
+
+            // Add input fields for parameters
+            params.forEach((param, index) => {
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.placeholder = param.substring(1);
+                input.id = `${previewId}-input-${index}`;
+                input.oninput = () => updatePreview(previewId, url, section);
+                input.onkeypress = (e) => handleEnter(e, previewId);
+                section.appendChild(input);
+            });
+
+            // Add querystring input for endpoints ending with "list"
+            if (isPaginated) {
+                const querystringInput = document.createElement('input');
+                querystringInput.type = 'text';
+                querystringInput.placeholder = 'query string';
+                querystringInput.id = `${previewId}-querystring`;
+                querystringInput.oninput = () => updatePreview(previewId, url, section);
+                querystringInput.onkeypress = (e) => handleEnter(e, previewId);
+                section.appendChild(querystringInput);
+            }
+
+            // Add URL preview
+            const preview = document.createElement('div');
+            preview.id = previewId;
+            preview.className = 'url-preview';
+            preview.textContent = url;
+            section.appendChild(preview);
+            if (!params.length && !isPaginated) {
+                preview.style.display = 'none';
+            }
+
+            // Add Go button
+            const button = document.createElement('button');
+            button.textContent = 'Go';
+            button.onclick = () => fetchJson(previewId);
+            section.appendChild(button);
+
+            // Add JSON response area
+            const responseArea = document.createElement('div');
+            responseArea.id = `${previewId}-response`;
+            responseArea.className = 'json-response';
+            responseArea.style.display = 'none';
+            section.appendChild(responseArea);
+
+            return section;
+        }
+
+        function updatePreview(previewId, template, section) {
+            const preview = document.getElementById(previewId);
+            let url = template;
+            
+            // Get all inputs in this section
+            const inputs = Array.from(section.getElementsByTagName('input'));
+            
+            // Replace each parameter with its input value
+            inputs.forEach(input => {
+                if (input.id.endsWith('-querystring')) {
+                    // Handle querystring separately
+                    const querystring = input.value.trim();
+                    if (querystring) {
+                        url = `${url}?${querystring}`;
+                    }
+                } else {
+                    const param = input.placeholder;
+                    url = url.replace(`:${param}`, input.value);
+                }
+            });
+            
+            preview.textContent = url;
+        }
+
+        async function fetchJson(previewId) {
+            const url = document.getElementById(previewId).textContent;
+            const responseArea = document.getElementById(`${previewId}-response`);
+
+            // Show response area and loading message
+            responseArea.style.display = 'block';
+            responseArea.textContent = 'Requesting...';
+
+            if (url.replace(/kaspatest:|kaspa:/, '').includes(":")) {
+                responseArea.innerHTML = "<span style='color: #884444;'>Please fill in all parameters</span>";
+                return;
+            }
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {  // response.ok is true if status code is 200-299
+                    responseArea.innerHTML = `<span style='color: #884444;'>Error: ${response.status} - ${response.statusText}</span>`;
+                    return;
+                }
+                const data = await response.json();
+                responseArea.innerHTML = stringify(data);
+            } catch (error) {
+                responseArea.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        function handleEnter(event, previewId) {
+            if (event.key === 'Enter') {
+                fetchJson(previewId);
+            }
+        }
+
+        function stringify(json) {
+            if (typeof json != 'string') {
+                json = JSON.stringify(json, (k, v) => { return typeof v === "bigint" ? v.toString() + 'n' : v; }, 2);
+            }
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"(\d+)n"/g,"$1n");
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?n?)/g, function (match) {
+                var cls = 'number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'key';
+                    } else {
+                        cls = 'string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        // Generate the interface
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('endpoints-container');
+            endpoints.forEach(url => {
+                container.appendChild(createEndpointSection(url));
+            });
+        });
+    </script>
+</body>
+</html>

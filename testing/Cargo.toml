@@ -1,0 +1,70 @@
+[package]
+name = "testing"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "krc721d Indexer Integration Testing"
+
+[features]
+default = []
+
+[build-dependencies]
+vergen = { version = "8.2.6", features = ["build", "git", "gitcl", "rustc", "cargo"] }
+
+[dependencies]
+krc721-core.workspace = true
+krc721-nexus = { workspace = true }
+krc721-database.workspace = true
+krc721-http-server.workspace = true
+krc721-rpc-core.workspace = true
+krc721-rpc-server.workspace = true
+krc721-cluster.workspace = true
+krc721-kaspad.workspace = true
+
+kaspa-addresses.workspace = true
+kaspa-bip32.workspace = true
+kaspa-consensus-core.workspace = true
+kaspa-hashes.workspace = true
+kaspa-notify.workspace = true
+kaspa-rpc-core.workspace = true
+kaspa-utils.workspace = true
+kaspa-wallet-core.workspace = true
+kaspa-wallet-keys.workspace = true
+kaspa-wrpc-client.workspace = true
+kaspa-core.workspace = true
+kaspad.workspace = true
+
+workflow-core.workspace = true
+workflow-http.workspace = true
+workflow-log.workspace = true
+workflow-wasm.workspace = true
+workflow-rpc.workspace = true
+
+async-trait.workspace = true
+ahash.workspace = true
+cfg-if.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+js-sys.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde-wasm-bindgen.workspace = true
+serde_with.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rolling-file.workspace = true
+tracing-appender.workspace = true
+rlimit.workspace = true
+nix.workspace = true
+fjall.workspace = true
+rand.workspace = true
+kaspa-txscript.workspace=true
+async-std.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
+clap.workspace = true

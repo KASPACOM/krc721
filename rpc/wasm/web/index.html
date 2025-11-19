@@ -1,0 +1,12 @@
+<html>
+    <head>
+        <script type="module">
+            import * as krc721 from './krc721-rpc/krc721-rpc.js';
+            (async () => {
+                await krc721.default('./krc721-rpc/krc721-rpc_bg.wasm');
+                console.log(krc721.version());
+            })();
+        </script>
+    </head>
+    <body></body>
+</html>

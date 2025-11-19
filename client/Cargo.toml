@@ -1,0 +1,90 @@
+[package]
+name = "krc721-rs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Kaspa KRC-721 Indexer Client"
+
+[lib]
+name = "krc721_rs"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "krc721"
+path = "src/krc721/main.rs"
+
+[[bin]]
+name = "krc20"
+path = "src/krc20/main.rs"
+
+[features]
+wasm32-sdk = ["kaspa-wasm/wasm32-sdk"]
+wasm32-core = ["kaspa-wasm/wasm32-core"]
+wasm32-rpc = ["kaspa-wasm/wasm32-rpc"]
+wasm32-keygen = ["kaspa-wasm/wasm32-keygen"]
+
+full = [] # this will include Kaspa WASM SDK exports
+# default = [
+#     "wasm32-core",
+#     "full" # for testing
+# ]
+default = []
+
+[build-dependencies]
+vergen = { version = "8.2.6", features = ["build", "git", "gitcl", "rustc", "cargo"] }
+
+[dependencies]
+krc721-core.workspace = true
+krc721-nexus.workspace = true
+krc721-rpc-core.workspace = true
+krc721-rpc-client.workspace = true
+
+kaspa-addresses.workspace = true
+kaspa-bip32.workspace = true
+kaspa-consensus-core.workspace = true
+kaspa-hashes.workspace = true
+kaspa-notify.workspace = true
+kaspa-rpc-core.workspace = true
+kaspa-txscript-errors.workspace = true
+kaspa-txscript.workspace = true
+kaspa-utils.workspace = true
+kaspa-wallet-core.workspace = true
+kaspa-wallet-keys.workspace = true
+kaspa-wasm.workspace = true
+kaspa-wrpc-client.workspace = true
+
+workflow-core.workspace = true
+workflow-http.workspace = true
+workflow-log.workspace = true
+workflow-wasm.workspace = true
+workflow-rpc.workspace = true
+
+cfg-if.workspace = true
+cliclack.workspace = true
+console.workspace = true
+futures-util.workspace = true
+futures.workspace = true
+js-sys.workspace = true
+pad.workspace = true
+qrcode.workspace = true
+rpassword.workspace = true
+secp256k1.workspace = true
+serde_json.workspace = true
+serde_with.workspace = true
+serde-wasm-bindgen.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+wasm-bindgen-futures.workspace = true
+wasm-bindgen.workspace = true
+web-sys.workspace = true
+async-channel = "2.3.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+kaspa-wasm.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
+clap.workspace = true
+

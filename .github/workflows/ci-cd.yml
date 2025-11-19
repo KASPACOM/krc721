@@ -1,0 +1,153 @@
+name: Build and Deploy KRC-721 Indexer
+
+on:
+  push:
+    branches: [main, develop]
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libssl-dev \
+          pkg-config \
+          protobuf-compiler \
+          libprotobuf-dev \
+          clang \
+          libclang-dev
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Run Clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Build Release
+      run: cargo build --release
+
+    - name: Run Tests
+      run: cargo test --release
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: krc721d-binary
+        path: target/release/krc721d
+        retention-days: 1
+
+  build-image-and-push:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: krc721d-binary
+          path: target/release/
+
+      - name: Set environment variables based on branch
+        run: |
+          BRANCH_NAME="${GITHUB_REF##*/}"
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "ECR_REPO_URI=009160070963.dkr.ecr.us-east-1.amazonaws.com/kaspacom/krc721d-prod" >> $GITHUB_ENV
+            echo "AWS_REGION=us-east-1" >> $GITHUB_ENV
+            echo "ARGO_PATH=prod/prod-a-ue1-cluster/krc721d/deployment.yaml" >> $GITHUB_ENV
+            echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
+            echo "IMAGE_TAG=latest" >> $GITHUB_ENV
+          elif [[ "$BRANCH_NAME" == "develop" ]]; then
+            echo "ECR_REPO_URI=009160070963.dkr.ecr.eu-central-1.amazonaws.com/kaspacom/krc721d-dev" >> $GITHUB_ENV
+            echo "AWS_REGION=eu-central-1" >> $GITHUB_ENV
+            echo "ARGO_PATH=dev/dev-a-eu1-cluster/krc721d/deployment.yaml" >> $GITHUB_ENV
+            echo "DEPLOY_ENV=dev" >> $GITHUB_ENV
+            echo "IMAGE_TAG=develop" >> $GITHUB_ENV
+          else
+            echo "Unsupported branch: $BRANCH_NAME"
+            exit 1
+          fi
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          DOCKER_BUILDKIT=1 docker build \
+            -t $ECR_REPO_URI:$IMAGE_TAG \
+            -t $ECR_REPO_URI:${{ github.sha }} \
+            -f docker/Dockerfile .
+
+      - name: Push Docker image to ECR
+        run: |
+          docker push $ECR_REPO_URI:$IMAGE_TAG
+          docker push $ECR_REPO_URI:${{ github.sha }}
+
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          owner: 'KASPACOM'
+          repositories: 'argo-cd'
+          app-id: ${{ secrets.ARGO_GH_APP_ID }}
+          private-key: ${{ secrets.ARGO_GH_APP_PRIVATE_KEY }}
+
+      - name: Checkout ArgoCD repository
+        uses: actions/checkout@v4
+        with:
+          repository: KASPACOM/argo-cd
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Update image tag in ArgoCD repository
+        run: |
+          sed -i "s|image: .*|image: $ECR_REPO_URI:${{ github.sha }}|" $ARGO_PATH
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add $ARGO_PATH
+          git commit -m "Update $DEPLOY_ENV-krc721d image to ${{ github.sha }}"
+          git push
+

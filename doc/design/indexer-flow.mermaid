@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph Blockchain
+        NODE[Kaspa Node]
+    end
+
+    subgraph Indexer ["KRC-721 Indexer"]
+        subgraph SyncComponent [Syncer]
+            HIST[Historical Data Sync]
+            SYNC_STATUS{Is Synced?}
+            TARGET[Target Block]
+        end
+
+        subgraph ProcessingComponent [Processor]
+            QUEUE[Real-time Queue]
+            PROC[Chain Changes Processor]
+            
+            subgraph Processing
+                REORG[Reorg Handler]
+                ADD[New Block Handler]
+            end
+        end
+
+        subgraph Database
+            DB[(Indexer DB)]
+            subgraph Tables
+                BLOCKS[Block State]
+                OPS[Operations]
+                TOKENS[Token State]
+                OWNERS[Ownership]
+            end
+        end
+    end
+
+    %% Flow during initial sync
+    NODE -->|Historical Data| HIST
+    HIST -->|Updates| SYNC_STATUS
+    HIST -->|Process| PROC
+    NODE -->|Real-time Changes| SYNC_STATUS
+    
+    SYNC_STATUS -->|No| QUEUE
+    QUEUE -->|Wait| SYNC_STATUS
+    
+    %% Flow when synced
+    SYNC_STATUS -->|Yes| PROC
+    
+    %% Processing flow
+    PROC -->|Check| REORG
+    REORG -->|If needed| DB
+    PROC -->|Process| ADD
+    ADD -->|Update| DB
+    
+    %% Database relationships
+    DB --> BLOCKS
+    DB --> OPS
+    DB --> TOKENS
+    DB --> OWNERS
+
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:2px;
+    classDef syncComponent fill:#e1f3d8,stroke:#333,stroke-width:2px;
+    classDef processingComponent fill:#ffd7d7,stroke:#333,stroke-width:2px;
+    classDef databaseComponent fill:#dae8fc,stroke:#333,stroke-width:2px;
+    classDef blockchain fill:#b7c9e3,stroke:#333,stroke-width:2px;
+
+    class SyncComponent syncComponent;
+    class ProcessingComponent processingComponent;
+    class Database databaseComponent;
+    class Blockchain blockchain;

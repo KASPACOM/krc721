@@ -1,0 +1,30 @@
+# Build artifacts (don't copy these, we'll build fresh)
+target/
+**/target/
+
+# Documentation
+*.md
+doc/
+README.md
+
+# Test files and data
+test
+testing/capture/
+benches/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# CI/CD (not needed in image)
+.github/
+.gitignore
+.dockerignore
+
+# Logs
+*.log
+

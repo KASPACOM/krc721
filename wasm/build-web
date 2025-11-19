@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+echo "building wasm32-sdk"
+wasm-pack build --weak-refs --target web --out-name krc721 --out-dir web/krc721 --features wasm32-sdk

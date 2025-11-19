@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+cargo fmt
+cargo clippy --workspace --all --all-targets
+# cargo clippy --workspace --all --all-targets --target wasm32-unknown-unknown
+

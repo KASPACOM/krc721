@@ -1,0 +1,45 @@
+[package]
+name = "krc721-http-server"
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+include.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+krc721-macros.workspace = true
+krc721-core.workspace = true
+krc721-nexus.workspace = true
+krc721-database.workspace = true
+krc721-snapshot.workspace = true
+
+ahash.workspace = true
+async-std.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+borsh.workspace = true
+cfg-if.workspace = true
+comrak.workspace = true
+console.workspace = true
+downcast-rs.workspace = true
+futures-util.workspace = true
+futures.workspace = true
+mime.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+strum.workspace = true
+syntect.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tower.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+workflow-core.workspace = true
+workflow-log.workspace = true

@@ -1,0 +1,41 @@
+#!/bin/bash
+# This script builds the Rusty Kaspa WASM32 SDK release.
+
+# make the script fail for any failed command
+set -e
+
+rm -rf release/*
+rm -rf web/*
+rm -rf nodejs/*
+rm -rf docs/*
+rm -rf examples/nodejs/typescript/lib
+
+mkdir -p release/krc721-wasm32-sdk/web
+mkdir -p release/krc721-wasm32-sdk/nodejs
+mkdir -p release/krc721-wasm32-sdk/docs
+
+wasm-pack build --weak-refs --target web --out-name krc721 --out-dir web/krc721 --features wasm32-sdk $@
+wasm-pack build --weak-refs --dev --target web --out-name krc721 --out-dir web/krc721-dev --features wasm32-sdk $@
+
+wasm-pack build --weak-refs --target nodejs --out-name krc721 --out-dir nodejs/krc721 --features wasm32-sdk $@
+wasm-pack build --weak-refs --dev --target nodejs --out-name krc721 --out-dir nodejs/krc721-dev --features wasm32-sdk $@
+
+typedoc --name "KRC-721 WASM32 SDK" --sourceLinkExternal --readme ./README.md --options ./build/docs/ --out docs/krc721 ./build/docs/krc721.ts
+
+cp -r web/krc721 release/krc721-wasm32-sdk/web/krc721
+cp -r web/krc721-dev release/krc721-wasm32-sdk/web/krc721-dev
+
+cp -r nodejs/krc721 release/krc721-wasm32-sdk/nodejs/krc721
+cp -r nodejs/krc721-dev release/krc721-wasm32-sdk/nodejs/krc721-dev
+
+cp -r docs/krc721 release/krc721-wasm32-sdk/docs/krc721
+
+# cp index.html release/krc721-wasm32-sdk/index.html
+cp README.md release/krc721-wasm32-sdk/README.md
+# cp CHANGELOG.md release/krc721-wasm32-sdk/CHANGELOG.md
+cp LICENSE release/krc721-wasm32-sdk/LICENSE
+
+pushd .
+cd release
+zip -q -r krc721-wasm32-sdk.zip krc721-wasm32-sdk
+popd

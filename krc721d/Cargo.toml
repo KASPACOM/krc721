@@ -1,0 +1,72 @@
+[package]
+name = "krc721d"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KRC-721 Indexer Daemon for Kaspa BlockDAG"
+
+[features]
+default = []
+
+[build-dependencies]
+vergen = { version = "8.2.6", features = ["build", "git", "gitcl", "rustc", "cargo"] }
+
+[dependencies]
+krc721-core.workspace = true
+krc721-nexus.workspace = true
+krc721-database.workspace = true
+krc721-snapshot.workspace = true
+krc721-http-server.workspace = true
+krc721-rpc-core.workspace = true
+krc721-rpc-server.workspace = true
+krc721-cluster.workspace = true
+krc721-kaspad.workspace = true
+
+kaspa-addresses.workspace = true
+kaspa-bip32.workspace = true
+kaspa-consensus-core.workspace = true
+kaspa-hashes.workspace = true
+kaspa-notify.workspace = true
+kaspa-rpc-core.workspace = true
+kaspa-utils.workspace = true
+kaspa-wallet-core.workspace = true
+kaspa-wallet-keys.workspace = true
+kaspa-wrpc-client.workspace = true
+kaspa-core.workspace = true
+kaspad.workspace = true
+kaspa-txscript.workspace = true
+
+workflow-core.workspace = true
+workflow-http.workspace = true
+workflow-log.workspace = true
+workflow-wasm.workspace = true
+workflow-rpc.workspace = true
+
+ahash.workspace = true
+async-trait.workspace = true
+cfg-if.workspace = true
+cliclack.workspace = true
+faster-hex.workspace = true
+futures-util.workspace = true
+futures.workspace = true
+js-sys.workspace = true
+nix.workspace = true
+rlimit.workspace = true
+rolling-file.workspace = true
+serde_json.workspace = true
+serde_with.workspace = true
+serde-wasm-bindgen.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+time.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+mimalloc = "0.1.46"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
+clap.workspace = true

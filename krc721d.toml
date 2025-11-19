@@ -1,0 +1,25 @@
+[mainnet]
+genesis = "c5d5a345523d48628e9e6523a0d93472d72a5a15a8ab7528496fa76c9d560314"
+protocols = ["ipfs"]
+daa_ecdsa_fix = 275270626
+
+[mainnet.restrict]
+KAS = true
+KASPA = true
+IGRA = true
+KEF = true
+USDT = true
+USDC = true
+KII = true
+USD = true
+EUR = true
+CAD = true
+AED = true
+NACHO = true
+
+[testnet-10]
+genesis = "0000000000000000000000000000000000000000000000000000000000000000"
+protocols = ["ipfs"]
+daa_ecdsa_fix = 305179582
+
+[testnet-10.restrict]

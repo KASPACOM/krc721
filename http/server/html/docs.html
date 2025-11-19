@@ -1,0 +1,439 @@
+<html>
+
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100..900;1,100..900&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap');
+
+            body {
+                padding: 32px;
+                margin: 0;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Roboto", Helvetica, Arial, sans-serif;
+                font-style: normal;
+                font-size: 16px;
+                line-height: 1.5;
+            }
+
+            .burger-menu {
+                display: none;
+            }
+
+            .mobile-nav {
+                display: none;
+            }
+
+            .outer-container {
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 32px;
+                color: #1f2328;
+                border: 1px solid #ccc;
+                border-radius: 8px;
+            }
+
+            pre {
+                font-family: Ubuntu, Consolas, Monaco, monospace;
+                font-size: 14px;
+                padding: 24px;
+                overflow-x: auto;
+            }
+
+            h1, h2 {
+                margin-top: 32px;
+            }
+
+            h1, h2, h3, h4, h5, h6 {
+                border-bottom: 1px solid #ccc;
+            }
+
+            a {
+                text-decoration: none;
+            }
+
+            /* Tab styles */
+            .tabs {
+                display: flex;
+                gap: 8px;
+                margin-bottom: 24px;
+                padding: 0 32px;
+                position: relative;
+                background: #fff;
+                border-bottom: 1px solid #ccc;
+                border-radius: 8px 8px 0 0;
+            }
+            .tab {
+                padding: 12px 24px;
+                cursor: pointer;
+                border: none;
+                background: none;
+                font-size: 16px;
+                position: relative;
+                color: #1f2328;
+                transition: background-color 0.2s ease;
+            }
+            .tab.active {
+                font-weight: 500;
+            }
+            .tabs::after {
+                content: '';
+                position: absolute;
+                bottom: -1px;
+                height: 2px;
+                background: #1f2328;
+                transition: all 0.3s ease;
+                width: var(--tab-width, 0);
+                transform: translateX(var(--tab-left, 0));
+                left: 0;
+            }
+            .tab:hover {
+                background: #f6f8fa;
+            }
+            .content {
+                display: none;
+            }
+            .content.active {
+                display: block;
+            }
+            .content .container {
+                border-top-left-radius: 0;
+                border-top-right-radius: 0;
+            }
+            .current-section {
+                display: none;
+            }
+
+            /* Mobile styles */
+            @media (max-width: 768px) {
+                body {
+                    padding: 0;
+                }
+
+                h1 {
+                    margin: 0px !important;
+                }
+
+                .current-section {
+                    display: block;
+                }
+
+                .outer-container {
+                    padding: 16px !important;
+                    border: none !important;
+                    border-radius: 0 !important;
+                    margin-top: 56px !important;
+                }
+
+                .mobile-header {
+                    display: flex !important;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 56px;
+                    background: white;
+                    border-bottom: 1px solid #e1e4e8;
+                    z-index: 999;
+                    align-items: center;
+                    padding: 0 16px;
+                }
+
+                .mobile-header .current-section {
+                    margin-left: 48px;
+                    font-weight: 500;
+                    font-size: 16px;
+                    flex-grow: 1;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .burger-menu {
+                    position: relative;
+                    top: 0;
+                    left: 0;
+                    margin-right: 8px;
+                    margin-top: -6px;
+                }
+
+                .mobile-nav .tab {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    width: 100%;
+                    text-align: left;
+                    padding: 16px;
+                    border-bottom: 1px solid #eee;
+                }
+
+                .mobile-nav .tab.active {
+                    background: #f6f8fa;
+                    font-weight: 500;
+                }
+
+                .mobile-nav .tab.active::after {
+                    content: '✓';
+                    margin-left: 8px;
+                    color: #1f883d;
+                }
+
+                .burger-menu {
+                    display: block !important;
+                    position: fixed;
+                    top: 16px;
+                    left: 16px;
+                    z-index: 1000;
+                    background: none;
+                    border: none;
+                    padding: 8px;
+                    cursor: pointer;
+                }
+
+                .burger-menu span {
+                    display: block;
+                    width: 24px;
+                    height: 2px;
+                    margin: 4px 0;
+                    background: #1f2328;
+                    transition: 0.3s;
+                }
+
+                .mobile-nav {
+                    display: block !important;
+                    position: fixed;
+                    top: 0;
+                    left: -250px;
+                    width: 250px;
+                    height: 100%;
+                    background: white;
+                    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+                    transition: 0.3s;
+                    z-index: 999;
+                    padding-top: 60px;
+                }
+
+                .mobile-nav.active {
+                    left: 0;
+                }
+
+                .tabs {
+                    display: none !important;
+                }
+
+                .overlay {
+                    display: none;
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.5);
+                    z-index: 998;
+                }
+
+                .overlay.active {
+                    display: block;
+                }
+            }
+
+
+        </style>
+    </head>
+
+    <body>
+        <div class="mobile-header">
+            <button class="burger-menu" id="burgerMenu">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+            <div class="current-section" id="currentSection"></div>
+        </div>
+        <div class="mobile-nav" id="mobileNav"></div>
+        <div class="overlay" id="overlay"></div>
+        <div class="outer-container">
+            <div class="tabs" id="tabs"></div>
+            
+            <div class="content active" data-tab-title="Overview">
+                    {overview_html}
+            </div>
+
+            <div class="content" data-tab-title="HTTP API">
+                    {rest_html}
+            </div>
+
+            <div class="content" data-tab-title="KRC-721 Specifications">
+                    {krc721_html}
+            </div>
+
+            <div class="content" data-tab-title="Rust">
+                    {rust_html}
+            </div>
+
+            <div class="content" data-tab-title="TypeScript">
+                    {ts_html}
+            </div>
+        </div>
+
+        <script>
+            function initTabs() {
+                const tabsContainer = document.getElementById('tabs');
+                const mobileNav = document.getElementById('mobileNav');
+                const burgerMenu = document.getElementById('burgerMenu');
+                const overlay = document.getElementById('overlay');
+                const contents = document.querySelectorAll('.content');
+                
+                // Helper function to convert title to slug
+                function slugify(text) {
+                    return text.toLowerCase()
+                        .replace(/\s+/g, '-')           // Replace spaces with dashes
+                        .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+                        .replace(/\-\-+/g, '-')         // Replace multiple dashes with single dash
+                        .replace(/^-+/, '')             // Trim dashes from start
+                        .replace(/-+$/, '');            // Trim dashes from end
+                }
+                
+                // Toggle mobile menu
+                function toggleMobileMenu() {
+                    mobileNav.classList.toggle('active');
+                    overlay.classList.toggle('active');
+                    
+                    // Animate burger menu
+                    const spans = burgerMenu.querySelectorAll('span');
+                    if (mobileNav.classList.contains('active')) {
+                        spans[0].style.transform = 'rotate(45deg) translate(5px, 5px)';
+                        spans[1].style.opacity = '0';
+                        spans[2].style.transform = 'rotate(-45deg) translate(5px, -5px)';
+                    } else {
+                        spans[0].style.transform = 'none';
+                        spans[1].style.opacity = '1';
+                        spans[2].style.transform = 'none';
+                    }
+                }
+
+                burgerMenu.addEventListener('click', toggleMobileMenu);
+                overlay.addEventListener('click', toggleMobileMenu);
+
+                // Create tabs from content sections and add slugs to content divs
+                contents.forEach(content => {
+                    const title = content.dataset.tabTitle;
+                    const slug = slugify(title);
+                    
+                    // Add slug to content div
+                    content.dataset.tabSlug = slug;
+                    
+                    // Create desktop tab
+                    const tab = document.createElement('button');
+                    tab.className = 'tab';
+                    tab.textContent = title;
+                    tab.dataset.tabTitle = title;
+                    tab.dataset.tabSlug = slug;
+                    tab.addEventListener('click', () => activateTab(slug));
+                    tabsContainer.appendChild(tab);
+
+                    // Create mobile nav item
+                    const mobileTab = document.createElement('button');
+                    mobileTab.className = 'tab';
+                    mobileTab.textContent = title;
+                    mobileTab.dataset.tabTitle = title;
+                    mobileTab.dataset.tabSlug = slug;
+                    mobileTab.addEventListener('click', () => {
+                        activateTab(slug);
+                        toggleMobileMenu();
+                    });
+                    mobileNav.appendChild(mobileTab);
+                });
+
+                function updateTabIndicator(activeTab) {
+                    const tabsEl = document.querySelector('.tabs');
+                    if (!activeTab || !tabsEl) return;
+                    
+                    // Only update if we're in desktop view (tabs are visible)
+                    if (window.innerWidth > 768) {
+                        const width = activeTab.offsetWidth;
+                        const left = activeTab.offsetLeft;
+                        
+                        // Update the indicator
+                        tabsEl.style.setProperty('--tab-width', width + 'px');
+                        tabsEl.style.setProperty('--tab-left', left + 'px');
+                    }
+                }
+
+                // Add window resize handler to update indicator
+                window.addEventListener('resize', () => {
+                    const activeTab = document.querySelector('.tabs .tab.active');
+                    updateTabIndicator(activeTab);
+                });
+
+                // Handle URL hash
+                function activateTab(slug) {
+                    // Update hash without triggering scroll
+                    history.replaceState(null, null, '#' + slug);
+                    
+                    // Update active states
+                    document.querySelectorAll('.tab').forEach(tab => {
+                        tab.classList.toggle('active', tab.dataset.tabSlug === slug);
+                        // Update current section title if this is the active tab
+                        if (tab.dataset.tabSlug === slug) {
+                            document.getElementById('currentSection').textContent = tab.dataset.tabTitle;
+                        }
+                    });
+                    
+                    // Update the indicator position - specifically for desktop tabs
+                    const activeDesktopTab = document.querySelector('.tabs .tab.active');
+                    updateTabIndicator(activeDesktopTab);
+                    
+                    // Update content visibility using slug
+                    contents.forEach(content => {
+                        content.classList.toggle('active', content.dataset.tabSlug === slug);
+                    });
+                }
+
+                // Add CSS custom properties for animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    .tabs::after {
+                        width: var(--tab-width, 0);
+                        transform: translateX(var(--tab-left, 0));
+                    }
+                `;
+                document.head.appendChild(style);
+
+                // Check URL hash on load
+                const hash = decodeURIComponent(window.location.hash.slice(1));
+                if (hash) {
+                    // Find tab with matching slug
+                    const tab = document.querySelector(`.tab[data-tab-slug="${hash}"]`);
+                    if (tab) {
+                        activateTab(hash);
+                    } else {
+                        // Activate first tab if hash not found
+                        const firstTab = document.querySelector('.tab');
+                        activateTab(firstTab.dataset.tabSlug);
+                    }
+                } else {
+                    // Activate first tab by default
+                    const firstTab = document.querySelector('.tab');
+                    activateTab(firstTab.dataset.tabSlug);
+                }
+
+                // Listen for hash changes
+                window.addEventListener('hashchange', () => {
+                    const newHash = decodeURIComponent(window.location.hash.slice(1));
+                    const tab = document.querySelector(`.tab[data-tab-slug="${newHash}"]`);
+                    if (tab) {
+                        activateTab(newHash);
+                    }
+                });
+
+                // Initial indicator position
+                const activeDesktopTab = document.querySelector('.tabs .tab.active');
+                updateTabIndicator(activeDesktopTab);
+            }
+
+            // Initialize when DOM is ready
+            document.addEventListener('DOMContentLoaded', initTabs);
+        </script>
+    </body>
+
+</html>

@@ -1,0 +1,173 @@
+[workspace]
+resolver = "2"
+members = [
+    "client",
+    "cluster",
+    "core",
+    "database",
+    "http/server",
+    "kaspad",
+    "krc721d",
+    "macros",
+    "nexus",
+    "rpc/client",
+    "rpc/core",
+    "rpc/server",
+    "snapshot",
+    "wasm",
+    "testing",
+]
+
+default-members = ["krc721d"]
+
+[workspace.package]
+rust-version = "1.83.0"
+version = "2.0.0"
+authors = ["KRC-721 Developers"]
+license = "Apache-2.0 OR MIT"
+edition = "2021"
+repository = "https://github.com/aspectron/krc721d"
+include = [
+    "src/**/*.rs",
+    "build.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+]
+
+[workspace.dependencies]
+
+krc721-kaspad = { path = "kaspad" }
+krc721-cluster = { path = "cluster" }
+krc721-core = { path = "core" }
+krc721-database = { path = "database" }
+krc721-snapshot = { path = "snapshot" }
+krc721-http-server = { path = "http/server" }
+krc721-macros = { path = "macros" }
+krc721-nexus = { path = "nexus" }
+krc721-rpc-client = { path = "rpc/client" }
+krc721-rpc-core = { path = "rpc/core" }
+krc721-rpc-server = { path = "rpc/server" }
+krc721-rs = { path = "client" }
+krc721-wasm = { path = "wasm" }
+krc721d = { path = "krc721d" }
+
+kaspa-addresses = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-bip32 = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-client = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-hashes = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-notify = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-rpc-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-txscript = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-txscript-errors = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-utils = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wallet-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wallet-keys = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wasm-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wrpc-client = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wrpc-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspad = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+
+workflow-core = "0.18.0"
+workflow-http = "0.18.0"
+workflow-log = "0.18.0"
+workflow-wasm = "0.18.0"
+workflow-rpc = "0.18.0"
+workflow-serializer = "0.18.0"
+workflow-perf-monitor = "0.0.2"
+
+ahash = "0.8.11"
+anyhow = "1.0.93"
+arc-swap = "1.7.1"
+async-channel = "2.3.1"
+async-std = { version = "1.13.0", features = ['attributes'] }
+async-trait = "0.1.83"
+axum = "0.8.1"
+bincode = "1.3.3"
+borsh = { version = "1.5.2", features = ["rc", "derive"] }
+bs58 = { version = "0.5.0", features = ["check","alloc"], default-features = false }
+bytemuck = "1.19.0"
+bytemuck_derive = "1.8.0"
+bytes = "1.9.0"
+cfg-if = "1.0.0"
+clap = { version = "4.5.21", features = ["derive", "string", "cargo"] }
+cliclack = "0.3.5"
+comrak = { version = "0.33.0", features = ["bon", "syntect"] }
+syntect = "5.0"
+console = "0.15.8"
+const-str = "0.5.7"
+convert_case = "0.6.0"
+crossbeam-channel = "0.5.14"
+ctrlc = "3.4.5"
+dashmap = "6.1.0"
+dirs = "5.0.1"
+downcast-rs = "1.2.1"
+faster-hex = "0.9.0" # keep at 0.9.0
+# lsm-tree = "2.5.0"
+# value-log = "=1.4.1"
+fjall = { version = "2.5.0", default-features = false, features = ["ssi_tx", "lz4", "bloom", "bytes"]}
+flate2 = "1.0.0"
+futures = "0.3.31"
+futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
+hex = { version = "0.4.3", features = ["serde"] }
+hex-literal = "0.4.1"
+hostname = "0.4.0"
+indicatif = "0.17.6"
+itertools = "0.13.0"
+js-sys = "0.3.72"
+k256 = "0.13.4"
+mime = "0.3.16"
+mini-moka = "0.10.3"
+nix = { version = "0.29.0", features = ["signal"]}
+num = "0.4.1"
+pad = "0.1.6"
+portable-atomic = { version = "1.10.0", features = ["float"] }
+primitive-types = "0.13.1"
+qrcode = "0.14.1"
+rand = "0.8.5"
+reqwest = { version = "0.12.1", features = ["stream","json"] }
+regex = "1.11.1"
+rlimit = "0.10.1"
+rolling-file = "0.2.0"
+rpassword = "7.3.1" # might be not needed
+secp256k1 = { version = "0.29.1", features = [ "global-context",  "rand-std",  "serde"] }
+serde = { version = "1.0.215", features = ["derive", "rc"] }
+serde_json = "1.0.132"
+serde_path_to_error = "0.1.16"
+serde_with = "3.8.1"
+serde-wasm-bindgen = "0.6.5"
+sha2 = "0.10.8"
+smallvec = "1.13.2"
+statsd = "0.16.1"
+strum = { version = "0.26.3", features = ["derive"] }
+tap = "1.0.1"
+tempfile = "3.15.0"
+thiserror = "2.0.9"
+time = { version = "0.3.37", features = ["macros"] }
+tokio = { version = "1.41.1", features = ["sync", "rt-multi-thread", "process", "fs"] }
+tokio-util = { version = "0.7", features = ["io"] }
+toml = "0.8.8"
+tower = { version = "0.5.1", features = ["buffer","limit"] }
+tower-http = { version = "0.5.1", features = ["cors","timeout","trace"] }
+tracing = "0.1.40"
+tracing-appender = "0.2.3"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "local-time"] }
+wasm-bindgen = { version = "0.2.95", features = ["serde-serialize"] }
+wasm-bindgen-futures = "0.4.40"
+web-sys = "0.3.72"
+wyhash = "0.5.0"
+
+
+[profile.release]
+opt-level = 2
+# opt-level = 3
+# lto = true
+
+[profile.native-release]
+inherits = "release"
+opt-level = 3
+lto = true
+# strip = true

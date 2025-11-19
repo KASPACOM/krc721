@@ -1,0 +1,3 @@
+#!/bin/bash
+
+wasm-pack build --target web --out-name krc721-rpc --out-dir web/krc721-rpc --features wasm32-sdk

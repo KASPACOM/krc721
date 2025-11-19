@@ -1,0 +1,11 @@
+[Unit]
+Description=krc721.stream
+
+[Service]
+User=username
+ExecStart=/home/username/krc721d/target/release/krc721d --local --testnet-10 --http
+RestartSec=5
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,42 @@
+[package]
+name = "krc721-database"
+rust-version.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[dependencies]
+krc721-core.workspace = true
+kaspa-consensus-core.workspace = true
+
+workflow-core.workspace = true
+workflow-log.workspace = true
+
+ahash.workspace = true
+async-trait.workspace = true
+bincode.workspace = true
+borsh.workspace = true
+bytes.workspace = true
+cfg-if.workspace = true
+crossbeam-channel.workspace = true
+faster-hex.workspace = true
+fjall.workspace = true
+flate2.workspace = true
+futures.workspace = true
+mini-moka.workspace = true
+rand.workspace = true
+serde_with.workspace = true
+serde.workspace = true
+sha2.workspace = true
+smallvec.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+indicatif.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true
