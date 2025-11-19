@@ -12,6 +12,12 @@ RUN apt-get update && apt-get install -y \
 # The binary is built in GitHub Actions and downloaded as artifact
 COPY target/release/krc721d /usr/local/bin/krc721d
 
+# Verify the binary was copied correctly
+RUN test -f /usr/local/bin/krc721d || (echo "ERROR: Binary file not found!" && exit 1) && \
+    ls -lh /usr/local/bin/krc721d && \
+    file /usr/local/bin/krc721d && \
+    chmod +x /usr/local/bin/krc721d
+
 # Copy configuration file
 COPY krc721d.toml /app/krc721d.toml
 

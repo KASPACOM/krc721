@@ -87,19 +87,50 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: krc721d-binary
-          path: target/release
+          path: .
           
-      - name: Verify binary exists
+      - name: Locate and verify binary
         run: |
-          if [ ! -f target/release/krc721d ]; then
-            echo "Error: Binary not found after download"
-            echo "Contents of target/release:"
-            ls -la target/release/ || echo "Directory doesn't exist"
+          echo "Searching for downloaded binary..."
+          find . -name krc721d -type f 2>/dev/null
+          
+          # Find the binary (it might be in different locations)
+          BINARY_PATH=$(find . -name krc721d -type f 2>/dev/null | head -1)
+          
+          if [ -z "$BINARY_PATH" ]; then
+            echo "ERROR: Binary not found after download"
+            echo "Contents of current directory:"
+            ls -la
+            echo "Contents of target/release if it exists:"
+            ls -la target/release/ 2>/dev/null || echo "target/release doesn't exist"
             exit 1
           fi
+          
+          echo "Found binary at: $BINARY_PATH"
+          
+          # Move to correct location for Docker build
+          mkdir -p target/release
+          mv "$BINARY_PATH" target/release/krc721d
+          
+          # Verify it's now in the right place
+          if [ ! -f target/release/krc721d ]; then
+            echo "ERROR: Failed to move binary to target/release/krc721d"
+            exit 1
+          fi
+          
+          echo "Binary details:"
           ls -lh target/release/krc721d
-          chmod +x target/release/krc721d
           file target/release/krc721d
+          BINARY_SIZE=$(stat -c%s target/release/krc721d 2>/dev/null || echo "0")
+          echo "Binary size: $BINARY_SIZE bytes"
+          
+          if [ "$BINARY_SIZE" -eq 0 ]; then
+            echo "ERROR: Binary file is empty!"
+            exit 1
+          fi
+          
+          chmod +x target/release/krc721d
+          echo "Binary ready at target/release/krc721d"
 
       - name: Set environment variables based on branch
         run: |
@@ -135,6 +166,14 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Verify binary before Docker build
+        run: |
+          echo "Verifying binary exists in build context..."
+          ls -lh target/release/krc721d
+          file target/release/krc721d
+          stat target/release/krc721d
+          echo "Binary size: $(du -h target/release/krc721d | cut -f1)"
 
       - name: Build Docker image
         run: |
