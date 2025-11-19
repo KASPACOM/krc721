@@ -109,13 +109,13 @@ jobs:
           if [[ "$BRANCH_NAME" == "main" ]]; then
             echo "ECR_REPO_URI=009160070963.dkr.ecr.us-east-1.amazonaws.com/kaspacom/krc721d-prod" >> $GITHUB_ENV
             echo "AWS_REGION=us-east-1" >> $GITHUB_ENV
-            echo "ARGO_PATH=prod/prod-a-ue1-cluster/krc721d/deployment.yaml" >> $GITHUB_ENV
+            echo "ARGO_PATH=prod/prod-a-ue1-cluster/kaspa-krc721d/deployment.yaml" >> $GITHUB_ENV
             echo "DEPLOY_ENV=prod" >> $GITHUB_ENV
             echo "IMAGE_TAG=latest" >> $GITHUB_ENV
           elif [[ "$BRANCH_NAME" == "develop" ]]; then
             echo "ECR_REPO_URI=009160070963.dkr.ecr.eu-central-1.amazonaws.com/kaspacom/krc721d-dev" >> $GITHUB_ENV
             echo "AWS_REGION=eu-central-1" >> $GITHUB_ENV
-            echo "ARGO_PATH=dev/dev-a-eu1-cluster/krc721d/deployment.yaml" >> $GITHUB_ENV
+            echo "ARGO_PATH=dev/dev-a-eu1-cluster/kaspa-krc721d/deployment.yaml" >> $GITHUB_ENV
             echo "DEPLOY_ENV=dev" >> $GITHUB_ENV
             echo "IMAGE_TAG=develop" >> $GITHUB_ENV
           else
