@@ -87,38 +87,19 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: krc721d-binary
-          path: .
+          path: target/release
           
-      - name: Locate and verify binary
+      - name: Verify binary exists and is valid
         run: |
-          echo "Searching for downloaded binary..."
-          find . -name krc721d -type f 2>/dev/null
-          
-          # Find the binary (it might be in different locations)
-          BINARY_PATH=$(find . -name krc721d -type f 2>/dev/null | head -1)
-          
-          if [ -z "$BINARY_PATH" ]; then
-            echo "ERROR: Binary not found after download"
-            echo "Contents of current directory:"
-            ls -la
-            echo "Contents of target/release if it exists:"
-            ls -la target/release/ 2>/dev/null || echo "target/release doesn't exist"
-            exit 1
-          fi
-          
-          echo "Found binary at: $BINARY_PATH"
-          
-          # Move to correct location for Docker build
-          mkdir -p target/release
-          mv "$BINARY_PATH" target/release/krc721d
-          
-          # Verify it's now in the right place
+          echo "Verifying binary at target/release/krc721d..."
           if [ ! -f target/release/krc721d ]; then
-            echo "ERROR: Failed to move binary to target/release/krc721d"
+            echo "ERROR: Binary not found at target/release/krc721d"
+            echo "Contents of target/release:"
+            ls -la target/release/ || echo "Directory doesn't exist"
             exit 1
           fi
           
-          echo "Binary details:"
+          echo "Binary found. Details:"
           ls -lh target/release/krc721d
           file target/release/krc721d
           BINARY_SIZE=$(stat -c%s target/release/krc721d 2>/dev/null || echo "0")
