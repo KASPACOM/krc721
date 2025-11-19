@@ -15,8 +15,8 @@ COPY target/release/krc721d /usr/local/bin/krc721d
 # Verify the binary was copied correctly
 RUN test -f /usr/local/bin/krc721d || (echo "ERROR: Binary file not found!" && exit 1) && \
     ls -lh /usr/local/bin/krc721d && \
-    file /usr/local/bin/krc721d && \
-    chmod +x /usr/local/bin/krc721d
+    chmod +x /usr/local/bin/krc721d && \
+    test -x /usr/local/bin/krc721d || (echo "ERROR: Binary is not executable!" && exit 1)
 
 # Copy configuration file
 COPY krc721d.toml /app/krc721d.toml
