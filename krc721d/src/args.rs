@@ -267,10 +267,12 @@ impl Args {
             enable_http_server = true;
         }
 
-        let http_listen = matches.get_one::<ContextualNetAddress>("http-listen")
+        let http_listen = matches
+            .get_one::<ContextualNetAddress>("http-listen")
             .map(|addr| addr.to_string());
 
-        let rpc_listen = matches.get_one::<ContextualNetAddress>("rpc-listen")
+        let rpc_listen = matches
+            .get_one::<ContextualNetAddress>("rpc-listen")
             .map(|addr| addr.to_string());
 
         let node_rpc = matches.get_one::<String>("node-rpc").cloned();
