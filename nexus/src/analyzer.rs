@@ -1331,4 +1331,260 @@ mod tests {
         let bytes = hex::decode(scriptsig).unwrap();
         assert!(detect_kspr_header(&bytes));
     }
+
+    // ================ MARKETPLACE TESTS ================
+
+    impl TestTransaction {
+        /// Create a test transaction with custom outputs (for List/Send testing)
+        fn with_outputs(signature_script: Vec<u8>, outputs: Vec<TransactionOutput>) -> Self {
+            let tx = Transaction::new(
+                0,
+                vec![TransactionInput {
+                    previous_outpoint: TransactionOutpoint::new(Default::default(), 0),
+                    signature_script: signature_script.clone(),
+                    sequence: 0,
+                    sig_op_count: 1,
+                }],
+                outputs,
+                0,
+                SubnetworkId::default(),
+                0,
+                vec![],
+            );
+            Self {
+                transaction: tx,
+                signature_script,
+            }
+        }
+
+        /// Create a test transaction with custom inputs and outputs (for Send testing)
+        fn with_inputs_outputs(
+            signature_script: Vec<u8>,
+            inputs: Vec<TransactionInput>,
+            outputs: Vec<TransactionOutput>,
+        ) -> Self {
+            let tx = Transaction::new(
+                0,
+                inputs,
+                outputs,
+                0,
+                SubnetworkId::default(),
+                0,
+                vec![],
+            );
+            Self {
+                transaction: tx,
+                signature_script,
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_deserialization() {
+        // Test that List inscription JSON deserializes correctly
+        let json = r#"{"p":"krc-721","op":"list","tick":"KASPA","tokenId":"42","price":"1500000000"}"#;
+        let op: UserOperation = serde_json::from_str(json).unwrap();
+        assert_eq!(op.op, Op::List);
+        assert_eq!(op.token_id, Some(42));
+        assert_eq!(op.price, Some(1_500_000_000));
+    }
+
+    #[test]
+    fn test_send_deserialization() {
+        // Test that Send inscription JSON deserializes correctly
+        let json = r#"{"p":"krc-721","op":"send","tick":"KASPA","tokenId":"42"}"#;
+        let op: UserOperation = serde_json::from_str(json).unwrap();
+        assert_eq!(op.op, Op::Send);
+        assert_eq!(op.token_id, Some(42));
+        assert_eq!(op.price, None);
+    }
+
+    #[test]
+    fn test_list_serialization_roundtrip() {
+        let op = UserOperation::try_new(Protocol::Krc721, Op::List, "KASPA")
+            .unwrap()
+            .with_token_id(42)
+            .with_price(1_500_000_000);
+        let json = serde_json::to_string(&op).unwrap();
+        let parsed: UserOperation = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.op, Op::List);
+        assert_eq!(parsed.token_id, Some(42));
+        assert_eq!(parsed.price, Some(1_500_000_000));
+    }
+
+    #[test]
+    fn test_detect_valid_list_inscription() {
+        let list_op = UserOperation::try_new(Protocol::Krc721, Op::List, "KASPA")
+            .unwrap()
+            .with_token_id(42)
+            .with_price(1_500_000_000);
+
+        let script = create_test_inscription(list_op);
+
+        // List needs output[0] to be the P2SH UTXO
+        // Use a dummy P2SH output (validation of P2SH correctness is in the processor)
+        let tx = TestTransaction::with_outputs(
+            script,
+            vec![TransactionOutput {
+                value: 1_500_000_000,
+                script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+            }],
+        );
+
+        let result = detect_krc721(&tx);
+        assert!(result.is_ok(), "List detection failed: {:?}", result.err());
+        let operation = result.unwrap().expect("Should have valid operation");
+        match &operation.info {
+            OperationInfo::List(info) => {
+                assert_eq!(info.token_id, 42);
+                assert_eq!(info.price, 1_500_000_000);
+            }
+            other => panic!("Expected List, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_detect_list_missing_token_id() {
+        let list_op = UserOperation::try_new(Protocol::Krc721, Op::List, "KASPA")
+            .unwrap()
+            .with_price(1_500_000_000);
+        // No token_id
+
+        let script = create_test_inscription(list_op);
+        let tx = TestTransaction::with_outputs(
+            script,
+            vec![TransactionOutput {
+                value: 1_500_000_000,
+                script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+            }],
+        );
+        let result = detect_krc721(&tx);
+        assert!(matches!(
+            result,
+            Err(AnalyzerError::OpListMissingValue(field)) if field == "token_id"
+        ));
+    }
+
+    #[test]
+    fn test_detect_list_missing_price() {
+        let list_op = UserOperation::try_new(Protocol::Krc721, Op::List, "KASPA")
+            .unwrap()
+            .with_token_id(42);
+        // No price
+
+        let script = create_test_inscription(list_op);
+        let tx = TestTransaction::with_outputs(
+            script,
+            vec![TransactionOutput {
+                value: 1000,
+                script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+            }],
+        );
+        let result = detect_krc721(&tx);
+        assert!(matches!(
+            result,
+            Err(AnalyzerError::OpListMissingValue(field)) if field == "price"
+        ));
+    }
+
+    #[test]
+    fn test_detect_valid_send_inscription() {
+        let send_op = UserOperation::try_new(Protocol::Krc721, Op::Send, "KASPA")
+            .unwrap()
+            .with_token_id(42);
+
+        let script = create_test_inscription(send_op);
+
+        let listing_txid = TransactionId::from_bytes([1u8; 32]);
+
+        // Send needs: input[0] with previous outpoint, output[0] = payment, output[1] = buyer
+        let tx = TestTransaction::with_inputs_outputs(
+            script.clone(),
+            vec![TransactionInput {
+                previous_outpoint: TransactionOutpoint::new(listing_txid, 0),
+                signature_script: script,
+                sequence: 0,
+                sig_op_count: 1,
+            }],
+            vec![
+                TransactionOutput {
+                    value: 1_500_000_000, // payment to seller
+                    script_public_key: ScriptPublicKey::new(0, vec![10u8; 34].into()),
+                },
+                TransactionOutput {
+                    value: 500_000_000, // change to buyer
+                    script_public_key: ScriptPublicKey::new(0, vec![20u8; 34].into()),
+                },
+            ],
+        );
+
+        let result = detect_krc721(&tx);
+        assert!(result.is_ok(), "Send detection failed: {:?}", result.err());
+        let operation = result.unwrap().expect("Should have valid operation");
+        match &operation.info {
+            OperationInfo::Send(info) => {
+                assert_eq!(info.token_id, 42);
+                assert_eq!(info.payment_amount, 1_500_000_000);
+                assert_eq!(info.listing_utxo_txid, listing_txid);
+                // Buyer should be output[1]
+                assert_eq!(info.buyer.script(), &[20u8; 34]);
+            }
+            other => panic!("Expected Send, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_detect_send_missing_token_id() {
+        let send_op = UserOperation::try_new(Protocol::Krc721, Op::Send, "KASPA")
+            .unwrap();
+        // No token_id
+
+        let script = create_test_inscription(send_op);
+        let tx = TestTransaction::with_outputs(
+            script,
+            vec![
+                TransactionOutput {
+                    value: 1_500_000_000,
+                    script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+                },
+                TransactionOutput {
+                    value: 500,
+                    script_public_key: ScriptPublicKey::new(0, vec![1u8; 34].into()),
+                },
+            ],
+        );
+        let result = detect_krc721(&tx);
+        assert!(matches!(
+            result,
+            Err(AnalyzerError::OpSendMissingValue(field)) if field == "token_id"
+        ));
+    }
+
+    #[test]
+    fn test_compute_listing_p2sh_deterministic() {
+        use krc721_core::inscriptions::krc721::compute_listing_p2sh;
+
+        let pubkey = [42u8; 32];
+        let (addr1, script1) = compute_listing_p2sh(&pubkey, "KASPA", 1, Prefix::Testnet);
+        let (addr2, script2) = compute_listing_p2sh(&pubkey, "KASPA", 1, Prefix::Testnet);
+
+        // Same inputs produce same P2SH address
+        assert_eq!(addr1, addr2);
+        assert_eq!(script1, script2);
+
+        // Different token_id produces different address
+        let (addr3, _) = compute_listing_p2sh(&pubkey, "KASPA", 2, Prefix::Testnet);
+        assert_ne!(addr1, addr3);
+
+        // Different pubkey produces different address
+        let (addr4, _) = compute_listing_p2sh(&[99u8; 32], "KASPA", 1, Prefix::Testnet);
+        assert_ne!(addr1, addr4);
+
+        // Different tick produces different address
+        let (addr5, _) = compute_listing_p2sh(&pubkey, "OTHER", 1, Prefix::Testnet);
+        assert_ne!(addr1, addr5);
+
+        // Address is a P2SH (ScriptHash) address
+        assert_eq!(addr1.version, kaspa_addresses::Version::ScriptHash);
+    }
 }
