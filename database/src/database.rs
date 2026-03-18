@@ -49,7 +49,6 @@ pub const PARTITION_SERIAL_TO_REJECTED_TXID: &str = "serial_to_rejected_txid";
 pub const PARTITION_LISTINGS: &str = "listings";
 pub const PARTITION_LISTINGS_BY_TICK: &str = "listings_by_tick";
 pub const PARTITION_ADDRESS_LISTINGS: &str = "address_listings";
-pub const PARTITION_LISTING_UTXO_INDEX: &str = "listing_utxo_index";
 
 pub const DEFAULT_REJECTION_LEN: usize = 64;
 
@@ -284,9 +283,6 @@ pub struct Db {
     pub listings_by_tick: ListingsByTickPartition,
     /// Seller's active listings. Key: {spk}:{tick}:{token_id}
     pub address_listings: AddressListingsPartition,
-    /// Reverse lookup: listing UTXO txid → {tick}:{token_id}
-    pub listing_utxo_index: ListingUtxoIndexPartition,
-
     snapshot_commit_rw: Arc<RwLock<()>>,
     serial_rejection: Arc<AtomicU64>,
 }
@@ -423,11 +419,6 @@ impl Db {
             PARTITION_ADDRESS_LISTINGS,
             PartitionCreateOptions::default(),
         )?);
-        let listing_utxo_index = Partition::new(keyspace.open_partition(
-            PARTITION_LISTING_UTXO_INDEX,
-            PartitionCreateOptions::default(),
-        )?);
-
         let serial = if keyspace
             .list_partitions()
             .iter()
@@ -480,7 +471,6 @@ impl Db {
             listings,
             listings_by_tick,
             address_listings,
-            listing_utxo_index,
             serial_rejection: Arc::new(serial.into()),
         })
     }

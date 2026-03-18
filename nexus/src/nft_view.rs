@@ -8,8 +8,8 @@ use krc721_core::model::krc721::{
     ScoredCheckedOperation, Tick, TickTokenOffset, TokenId, TokenLookupArgs,
 };
 use krc721_database::database::{
-    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, OwnershipHistoryKey, OwnershipKey,
-    RangeKey, ScoredDeployInfoWithCommon,
+    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, ListingByTickKey, ListingValue,
+    OwnershipHistoryKey, OwnershipKey, RangeKey, ScoredDeployInfoWithCommon,
 };
 use krc721_database::prelude::ReadTransaction;
 use std::sync::Arc;
@@ -747,4 +747,148 @@ impl DbView {
             Ok(Some(AvailableRanges::Available(ranges)))
         }
     }
+
+    // ---------------------
+    // --- MARKETPLACE ---
+    // ---------------------
+
+    /// Get active listings for a collection, sorted by price (ascending)
+    #[instrument(level = "error", skip(self), err)]
+    pub fn krc721_active_listings(
+        &self,
+        tick: Tick,
+        IteratorArgs {
+            offset,
+            direction,
+            limit,
+        }: IteratorArgs<Score>,
+    ) -> Result<Option<(Vec<ListingEntry>, ListingEntry)>> {
+        let rtx = &self.db.read_tx();
+        // Verify collection exists
+        if self.db.collection_registry.get_rtx(rtx, &tick)?.is_none() {
+            return Ok(None);
+        }
+
+        let processed_fn = |_rtx: &ReadTransaction,
+                            key: ListingByTickKey,
+                            _: ()| {
+            // Look up the full listing data
+            let listing = self
+                .db
+                .listings
+                .get_rtx(_rtx, &OwnershipKey { tick: key.tick, token_id: key.token_id })?
+                .ok_or(Error::custom("listing index inconsistency"))?;
+            Ok(ListingEntry {
+                tick: key.tick,
+                token_id: key.token_id,
+                price: key.price,
+                seller: listing.seller,
+                listing_tx_id: listing.listing_tx_id,
+                redeem_script: listing.redeem_script,
+                op_score: listing.op_score,
+            })
+        };
+
+        // Use price-sorted index. Offset is op_score but we use price=0 as start
+        match direction {
+            Direction::Forward => Ok(self.process_iter(
+                rtx,
+                self.db.listings_by_tick.range_rtx(
+                    rtx,
+                    ListingByTickKey { tick, price: offset, token_id: 0 }
+                        ..=ListingByTickKey { tick, price: u64::MAX, token_id: u64::MAX },
+                ),
+                limit,
+                processed_fn,
+            )?),
+            Direction::Backward => Ok(self.process_iter(
+                rtx,
+                self.db.listings_by_tick.range_rtx(
+                    rtx,
+                    ListingByTickKey { tick, price: 0, token_id: 0 }
+                        ..=ListingByTickKey { tick, price: offset, token_id: u64::MAX },
+                ).rev(),
+                limit,
+                processed_fn,
+            )?),
+        }
+    }
+
+    /// Look up a single listing by tick and token_id
+    #[instrument(level = "error", skip(self), err)]
+    pub fn krc721_listing_lookup(
+        &self,
+        tick: Tick,
+        token_id: u64,
+    ) -> Result<Option<ListingValue>> {
+        let rtx = self.db.read_tx();
+        Ok(self.db.listings.get_rtx(&rtx, &OwnershipKey { tick, token_id })?)
+    }
+
+    /// Get active listings for an address
+    #[instrument(level = "error", skip(self), err)]
+    pub fn krc721_address_listings(
+        &self,
+        spk: &ScriptPublicKey,
+        IteratorArgs {
+            offset,
+            direction,
+            limit,
+        }: IteratorArgs<TickTokenOffset>,
+    ) -> Result<Option<(Vec<ListingEntry>, ListingEntry)>> {
+        let rtx = &self.db.read_tx();
+
+        let processed_fn = |_rtx: &ReadTransaction,
+                            key: AddressHoldingKey,
+                            _score: u64| {
+            let listing = self
+                .db
+                .listings
+                .get_rtx(_rtx, &OwnershipKey { tick: key.tick, token_id: key.token_id })?
+                .ok_or(Error::custom("listing index inconsistency"))?;
+            Ok(ListingEntry {
+                tick: key.tick,
+                token_id: key.token_id,
+                price: listing.price,
+                seller: listing.seller,
+                listing_tx_id: listing.listing_tx_id,
+                redeem_script: listing.redeem_script,
+                op_score: listing.op_score,
+            })
+        };
+
+        match direction {
+            Direction::Forward => Ok(self.process_iter(
+                rtx,
+                self.db.address_listings.range_rtx(
+                    rtx,
+                    AddressHoldingKey { spk: spk.clone(), tick: offset.tick, token_id: offset.token_id }
+                        ..=AddressHoldingKey { spk: spk.clone(), tick: Tick::MAX, token_id: u64::MAX },
+                ),
+                limit,
+                processed_fn,
+            )?),
+            Direction::Backward => Ok(self.process_iter(
+                rtx,
+                self.db.address_listings.range_rtx(
+                    rtx,
+                    AddressHoldingKey { spk: spk.clone(), tick: Tick::MIN, token_id: 0 }
+                        ..=AddressHoldingKey { spk: spk.clone(), tick: offset.tick, token_id: offset.token_id },
+                ).rev(),
+                limit,
+                processed_fn,
+            )?),
+        }
+    }
+}
+
+/// A listing entry returned from view queries
+pub struct ListingEntry {
+    pub tick: Tick,
+    pub token_id: u64,
+    pub price: u64,
+    pub seller: ScriptPublicKey,
+    pub listing_tx_id: TransactionId,
+    pub redeem_script: Vec<u8>,
+    pub op_score: u64,
 }

@@ -1201,17 +1201,6 @@ pub type ListingsByTickPartition = Partition<ListingByTickKey, ()>;
 /// Same key structure as AddressHoldingKey
 pub type AddressListingsPartition = Partition<AddressHoldingKey, ModTxScore>;
 
-/// Value for the UTXO reverse index
-#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
-pub struct ListingUtxoRef {
-    pub tick: Tick,
-    pub token_id: u64,
-}
-
-/// Reverse lookup: UTXO txid → ListingUtxoRef
-/// Used to detect when a listing UTXO is spent (for implicit cancellation)
-pub type ListingUtxoIndexPartition = Partition<TransactionId, ListingUtxoRef>;
-
 #[cfg(test)]
 mod tests {
     use super::*;

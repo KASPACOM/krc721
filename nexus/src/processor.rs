@@ -15,8 +15,8 @@ use krc721_core::model::krc721::{
 };
 use krc721_core::runtime::{Runtime, Service, ServiceError, ServiceResult};
 use krc721_database::database::{
-    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, ListingByTickKey, ListingUtxoRef,
-    ListingValue, MintHistoryKey, OwnershipHistoryKey, OwnershipKey, ScoredDeployInfoWithCommon,
+    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, ListingByTickKey, ListingValue,
+    MintHistoryKey, OwnershipHistoryKey, OwnershipKey, ScoredDeployInfoWithCommon,
     ScoredDiscountKey, StatsDiffs, TokenMintsKey, VipKey, WriteTransaction,
 };
 pub use result::Result;
@@ -1276,16 +1276,6 @@ impl Processor {
             &tx_score,
         )?;
 
-        // UTXO reverse index (for cancel detection)
-        self.db.listing_utxo_index.insert_wtx(
-            wtx,
-            common.tx_id,
-            &ListingUtxoRef {
-                tick: common.tick,
-                token_id: info.token_id,
-            },
-        )?;
-
         Ok(Ok(()))
     }
 
@@ -1377,10 +1367,6 @@ impl Processor {
                 token_id,
             },
         )?;
-        self.db
-            .listing_utxo_index
-            .remove_wtx(wtx, &listing.listing_tx_id)?;
-
         Ok(Ok(()))
     }
 
