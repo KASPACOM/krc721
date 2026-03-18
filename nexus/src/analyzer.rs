@@ -14,8 +14,8 @@ use krc721_core::error::TickError;
 use krc721_core::inscriptions::ascii_debug_payload;
 use krc721_core::model::kasplex;
 use krc721_core::model::krc721::{
-    DeployInfo, DiscountInfo, MintInfo, Op, Operation, OperationCommon, OperationInfo,
-    RoyaltyDetails, Tick, TransferInfo, UserOperation,
+    DeployInfo, DiscountInfo, ListingInfo, MintInfo, Op, Operation, OperationCommon, OperationInfo,
+    RoyaltyDetails, SendInfo, Tick, TransferInfo, UserOperation,
 };
 use serde_json::from_slice;
 use smallvec::SmallVec;
@@ -42,8 +42,17 @@ pub trait ITransaction: Debug {
     fn first_output_amt(&self) -> Option<u64>;
     fn fee(&self) -> u64;
     fn block_time(&self) -> u64;
-
     fn accepting_block_daa_score(&self) -> u64;
+
+    // Marketplace extensions
+    /// Get the ScriptPublicKey of output at given index
+    fn output_spk(&self, index: usize) -> Option<ScriptPublicKey>;
+    /// Get the amount of output at given index
+    fn output_amt(&self, index: usize) -> Option<u64>;
+    /// Get the previous outpoint transaction ID of input at given index
+    fn input_prev_txid(&self, index: usize) -> Option<TransactionId>;
+    /// Get the sender's pubkey bytes from the signature script (x-only, 32 bytes)
+    fn sender_pubkey_bytes(&self) -> Option<Vec<u8>>;
 }
 
 #[derive(Error, Debug)]
@@ -71,6 +80,10 @@ pub enum AnalyzerError {
     Tick(#[from] TickError),
     #[error("Missing mandatory value for Transfer operation: {0}")]
     OpTransferMissingValue(&'static str),
+    #[error("Missing mandatory value for List operation: {0}")]
+    OpListMissingValue(&'static str),
+    #[error("Missing mandatory value for Send operation: {0}")]
+    OpSendMissingValue(&'static str),
     #[error("Insufficient mint fee: {0}")]
     InsufficientMintFee(u64),
     #[error("Insufficient deploy fee: {0}")]
@@ -473,6 +486,85 @@ impl Analyzer {
                     }))
                 }
             }
+            Op::List => {
+                let token_id = model
+                    .token_id
+                    .ok_or(AnalyzerError::OpListMissingValue("token_id"))?;
+                let price = model
+                    .price
+                    .ok_or(AnalyzerError::OpListMissingValue("price"))?;
+
+                // Compute the expected P2SH listing address from sender's pubkey
+                let sender_pubkey = sigtx.sender_pubkey_bytes().ok_or(
+                    AnalyzerError::OpListMissingValue("sender pubkey"),
+                )?;
+                let (_, redeem_script) =
+                    krc721_core::inscriptions::krc721::compute_listing_p2sh(
+                        &sender_pubkey,
+                        tick.as_str(),
+                        token_id,
+                        self.address_prefix,
+                    );
+
+                // Capture the P2SH UTXO address from output[0]
+                let utxo_address = sigtx
+                    .output_spk(0)
+                    .ok_or(AnalyzerError::OpListMissingValue("output[0] for P2SH UTXO"))?;
+
+                Ok(Some(Operation {
+                    common: OperationCommon {
+                        tick,
+                        tx_id,
+                        block_time,
+                        sender,
+                        fee: sigtx.fee(),
+                        accepting_block_daa_score: sigtx.accepting_block_daa_score(),
+                    },
+                    info: OperationInfo::List(ListingInfo {
+                        token_id,
+                        price,
+                        utxo_address,
+                        redeem_script,
+                    }),
+                }))
+            }
+            Op::Send => {
+                let token_id = model
+                    .token_id
+                    .ok_or(AnalyzerError::OpSendMissingValue("token_id"))?;
+
+                // Payment amount from output[0] (goes to seller)
+                let payment_amount = sigtx
+                    .output_amt(0)
+                    .ok_or(AnalyzerError::OpSendMissingValue("output[0] payment amount"))?;
+
+                // Buyer address from output[1]
+                let buyer = sigtx
+                    .output_spk(1)
+                    .ok_or(AnalyzerError::OpSendMissingValue("output[1] buyer address"))?;
+
+                // The listing UTXO being spent (input[0].previous_outpoint.txid)
+                let listing_utxo_txid = sigtx
+                    .input_prev_txid(0)
+                    .ok_or(AnalyzerError::OpSendMissingValue("input[0] previous outpoint"))?;
+
+                Ok(Some(Operation {
+                    common: OperationCommon {
+                        tick,
+                        tx_id,
+                        block_time,
+                        sender,
+                        fee: sigtx.fee(),
+                        accepting_block_daa_score: sigtx.accepting_block_daa_score(),
+                    },
+                    info: OperationInfo::Send(SendInfo {
+                        token_id,
+                        payment_amount,
+                        buyer,
+                        listing_utxo_txid,
+                    }),
+                }))
+            }
         }
     }
 }
@@ -543,6 +635,51 @@ impl ITransaction for ContextTransaction {
 
     fn accepting_block_daa_score(&self) -> u64 {
         self.accepting_block_daa_score
+    }
+
+    fn output_spk(&self, index: usize) -> Option<ScriptPublicKey> {
+        self.tx
+            .outputs
+            .get(index)
+            .map(|o| o.script_public_key.clone())
+    }
+
+    fn output_amt(&self, index: usize) -> Option<u64> {
+        self.tx.outputs.get(index).map(|o| o.value)
+    }
+
+    fn input_prev_txid(&self, index: usize) -> Option<TransactionId> {
+        self.tx
+            .inputs
+            .get(index)
+            .map(|i| i.previous_outpoint.transaction_id)
+    }
+
+    fn sender_pubkey_bytes(&self) -> Option<Vec<u8>> {
+        // The first opcode in the signature script is the pubkey push
+        let sig_script = self.tx.inputs.first()?.signature_script.as_slice();
+        let mut opcodes = parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(sig_script);
+        // In P2SH reveal: the redeem script is the second push
+        // In the redeem script itself: first push is the pubkey
+        // For our purposes, we parse the redeem script (second push in sig_script)
+        let second = opcodes.nth(1)?.ok()?;
+        if !second.is_push_opcode() {
+            return None;
+        }
+        let inner_data = second.get_data();
+        let inner_opcodes =
+            parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(inner_data)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+        if inner_opcodes.is_empty() {
+            return None;
+        }
+        let pubkey_opcode = inner_opcodes[0].as_ref();
+        if pubkey_opcode.is_push_opcode() && pubkey_opcode.get_data().len() == 32 {
+            Some(pubkey_opcode.get_data().to_vec())
+        } else {
+            None
+        }
     }
 }
 
@@ -874,6 +1011,29 @@ mod tests {
 
         fn accepting_block_daa_score(&self) -> u64 {
             0
+        }
+
+        fn output_spk(&self, index: usize) -> Option<ScriptPublicKey> {
+            self.transaction
+                .outputs
+                .get(index)
+                .map(|o| o.script_public_key.clone())
+        }
+
+        fn output_amt(&self, index: usize) -> Option<u64> {
+            self.transaction.outputs.get(index).map(|o| o.value)
+        }
+
+        fn input_prev_txid(&self, index: usize) -> Option<TransactionId> {
+            self.transaction
+                .inputs
+                .get(index)
+                .map(|i| i.previous_outpoint.transaction_id)
+        }
+
+        fn sender_pubkey_bytes(&self) -> Option<Vec<u8>> {
+            // For tests, extract from the mock signature script
+            Some(vec![231u8; 32])
         }
     }
 

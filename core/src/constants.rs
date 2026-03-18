@@ -5,6 +5,7 @@ pub const KSPR_FEE_DEPLOY: u64 = 1_000 * SOMPI_PER_KASPA;
 pub const KSPR_FEE_MINT: u64 = 10 * SOMPI_PER_KASPA;
 pub const MIN_ROYALTY_FEE: u64 = SOMPI_PER_KASPA / 10;
 pub const MAX_ROYALTY_FEE: u64 = 10_000_000 * SOMPI_PER_KASPA;
+pub const MIN_LISTING_PRICE: u64 = SOMPI_PER_KASPA / 10; // 0.1 KAS minimum listing price
 
 pub const PROTOCOL_KASPLEX_NAMESPACE: &str = "kasplex";
 pub const PROTOCOL_KSPR_NAMESPACE: &str = "kspr";

@@ -238,4 +238,21 @@ pub trait DataT: Send + Sync {
         &self,
         args: TokenListLookupArgs,
     ) -> CoreResult<Option<AvailableRanges>>;
+
+    async fn krc721_active_listings(
+        &self,
+        args: TokenListLookupArgs,
+        iter_args: IteratorArgs<Score>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, Score>>;
+
+    async fn krc721_listing_lookup(
+        &self,
+        args: TokenLookupArgs,
+    ) -> CoreResult<Option<ListingMetaWrapper>>;
+
+    async fn krc721_address_listings(
+        &self,
+        args: AddressListLookupArgs,
+        iter_args: IteratorArgs<TickTokenOffset>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, TickTokenOffset>>;
 }

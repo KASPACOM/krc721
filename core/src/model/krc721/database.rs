@@ -124,6 +124,40 @@ pub struct DiscountInfo {
 }
 
 #[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
+pub struct ListingInfo {
+    #[serde(rename = "tokenId")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub token_id: u64,
+    /// Asking price in sompi
+    #[serde_as(as = "DisplayFromStr")]
+    pub price: u64,
+    /// The P2SH address where the listing UTXO was sent
+    #[serde(skip)]
+    pub utxo_address: ScriptPublicKey,
+    /// The redeem script (needed to spend the listing UTXO)
+    #[serde(skip)]
+    pub redeem_script: Vec<u8>,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
+pub struct SendInfo {
+    #[serde(rename = "tokenId")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub token_id: u64,
+    /// Payment amount from tx output[0] (validated against listing price)
+    #[serde(skip)]
+    pub payment_amount: u64,
+    /// The buyer's address (from tx output[1])
+    #[serde(skip)]
+    pub buyer: ScriptPublicKey,
+    /// The listing UTXO txid being spent (from input[0].previous_outpoint)
+    #[serde(skip)]
+    pub listing_utxo_txid: TransactionId,
+}
+
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize, BorshDeserialize, BorshSerialize, Default)]
 pub struct OperationCommon {
     pub tick: Tick,
@@ -156,6 +190,8 @@ pub enum OperationInfo {
     Mint(MintInfo),
     Transfer(TransferInfo),
     Discount(DiscountInfo),
+    List(ListingInfo),
+    Send(SendInfo),
 }
 
 #[repr(u8)]
@@ -204,6 +240,27 @@ pub enum CtxValidationError {
     WrongDeployer,
     #[error("Discounted fee must be less than royalty fee")]
     DiscountFeeOverflow,
+
+    #[error("Token is already listed for sale")]
+    TokenAlreadyListed,
+
+    #[error("Listing not found for this token")]
+    ListingNotFound,
+
+    #[error("Insufficient payment for listing price")]
+    InsufficientPayment,
+
+    #[error("Input does not spend the listing UTXO")]
+    WrongListingUtxo,
+
+    #[error("Token is listed and cannot be transferred directly")]
+    TokenIsListed,
+
+    #[error("Invalid listing P2SH address")]
+    InvalidListingP2sh,
+
+    #[error("Listing price must be greater than zero")]
+    InvalidListingPrice,
 }
 
 #[derive(Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]

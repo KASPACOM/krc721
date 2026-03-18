@@ -3,7 +3,7 @@ use crate::model::krc721::*;
 use crate::network::Network;
 use itertools::Itertools;
 use kaspa_addresses::{Address, Prefix};
-use kaspa_consensus_core::tx::TransactionId;
+use kaspa_consensus_core::tx::{ScriptPublicKey, TransactionId};
 use kaspa_txscript::extract_script_pub_key_address;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
@@ -126,6 +126,8 @@ pub struct IndexerStatus {
     pub token_deployments_total: u64,
     pub token_mints_total: u64,
     pub token_transfers_total: u64,
+    pub token_listings_total: u64,
+    pub token_sends_total: u64,
 }
 
 /// API-related structs
@@ -184,6 +186,9 @@ impl OperationMetaWrapper {
             }
             OperationInfo::Mint(MintInfo { ref to, .. }) => {
                 Some(extract_script_pub_key_address(to, prefix)?)
+            }
+            OperationInfo::Send(SendInfo { ref buyer, .. }) => {
+                Some(extract_script_pub_key_address(buyer, prefix)?)
             }
             _ => None,
         };
@@ -366,6 +371,55 @@ impl ScoredDeployInfoWithCommon {
 }
 
 #[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct ListingState {
+    pub tick: Tick,
+    #[serde(rename = "tokenId")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub token_id: u64,
+    /// Asking price in sompi
+    #[serde_as(as = "DisplayFromStr")]
+    pub price: u64,
+    /// Seller's ScriptPublicKey
+    #[serde(skip)]
+    pub seller: ScriptPublicKey,
+    /// The listing transaction ID (UTXO reference)
+    #[serde(rename = "listingTxId")]
+    pub listing_tx_id: TransactionId,
+    /// The P2SH address where the listing UTXO was sent
+    #[serde(skip)]
+    pub utxo_address: ScriptPublicKey,
+    /// Full redeem script hex (needed to construct buyer's SEND tx)
+    #[serde(skip)]
+    pub redeem_script: Vec<u8>,
+    /// Operation score when listed (for reorg handling)
+    #[serde(skip)]
+    pub op_score: u64,
+}
+
+#[serde_as]
+#[derive(Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
+pub struct ListingMetaWrapper {
+    pub tick: Tick,
+    #[serde(rename = "tokenId")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub token_id: u64,
+    #[serde_as(as = "DisplayFromStr")]
+    pub price: u64,
+    pub seller: Address,
+    #[serde(rename = "listingTxId")]
+    pub listing_tx_id: TransactionId,
+    #[serde(rename = "redeemScript")]
+    pub redeem_script: String,
+    #[serde(rename = "opScore")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub op_score: u64,
+    #[serde(flatten)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<Metadata>,
+}
+
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct Collection {
     #[serde(flatten)]
@@ -509,6 +563,10 @@ pub struct UserOperation {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub premint: Option<u64>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub price: Option<u64>,
 }
 
 impl UserOperation {
@@ -530,6 +588,7 @@ impl UserOperation {
             daa_mint_start: None,
             discount_fee: None,
             premint: None,
+            price: None,
         })
     }
 
@@ -567,6 +626,11 @@ impl UserOperation {
 
     pub fn with_discount_fee(mut self, fee: u64) -> Self {
         self.discount_fee = Some(fee);
+        self
+    }
+
+    pub fn with_price(mut self, price: u64) -> Self {
+        self.price = Some(price);
         self
     }
 }
@@ -636,6 +700,7 @@ impl UserOperation {
             daa_mint_start: None,
             discount_fee: None,
             premint: None,
+            price: None,
         }
     }
 }

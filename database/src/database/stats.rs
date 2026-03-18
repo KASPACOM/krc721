@@ -8,6 +8,8 @@ pub struct Stats {
     pub transfers: u64,
     pub royalty_fees: u64,
     pub security_fees: u64,
+    pub listings: u64,
+    pub sends: u64,
 }
 
 pub type StatsDiffs = Stats;
@@ -29,6 +31,8 @@ impl Add for Stats {
             transfers: transfers_rhs,
             royalty_fees: royalty_fees_rhs,
             security_fees: security_fees_rhs,
+            listings: listings_rhs,
+            sends: sends_rhs,
         }: StatsDiffs,
     ) -> Self::Output {
         let Stats {
@@ -37,6 +41,8 @@ impl Add for Stats {
             transfers,
             royalty_fees,
             security_fees,
+            listings,
+            sends,
         } = self;
         Stats {
             deployments: deployments.saturating_add(deployments_rhs),
@@ -44,6 +50,8 @@ impl Add for Stats {
             transfers: transfers.saturating_add(transfers_rhs),
             royalty_fees: royalty_fees.saturating_add(royalty_fees_rhs),
             security_fees: security_fees.saturating_add(security_fees_rhs),
+            listings: listings.saturating_add(listings_rhs),
+            sends: sends.saturating_add(sends_rhs),
         }
     }
 }
@@ -65,6 +73,8 @@ impl Sub for Stats {
             transfers: transfers_rhs,
             royalty_fees: royalty_fees_rhs,
             security_fees: security_fees_rhs,
+            listings: listings_rhs,
+            sends: sends_rhs,
         }: StatsDiffs,
     ) -> Self::Output {
         let Stats {
@@ -73,6 +83,8 @@ impl Sub for Stats {
             transfers,
             royalty_fees,
             security_fees,
+            listings,
+            sends,
         } = self;
         Stats {
             deployments: deployments.saturating_sub(deployments_rhs),
@@ -80,6 +92,8 @@ impl Sub for Stats {
             transfers: transfers.saturating_sub(transfers_rhs),
             royalty_fees: royalty_fees.saturating_sub(royalty_fees_rhs),
             security_fees: security_fees.saturating_sub(security_fees_rhs),
+            listings: listings.saturating_sub(listings_rhs),
+            sends: sends.saturating_sub(sends_rhs),
         }
     }
 }

@@ -9,14 +9,15 @@ use kaspa_consensus_core::tx::ScriptPublicKey;
 use kaspa_rpc_core::RpcHash;
 use krc721_core::model::krc721::{
     BlueScoredChainBlockHash, CheckedOperation, CtxValidationError, DeployInfo,
-    DeployInfoWithCommon, DiscountInfo, Mergeset, MintInfo, Operation, OperationCommon,
-    OperationInfo, ScoredCheckedOperation, Tick, TransferInfo, VirtualChainChanges,
+    DeployInfoWithCommon, DiscountInfo, ListingInfo, Mergeset, MintInfo, Operation,
+    OperationCommon, OperationInfo, ScoredCheckedOperation, SendInfo, Tick, TransferInfo,
+    VirtualChainChanges,
 };
 use krc721_core::runtime::{Runtime, Service, ServiceError, ServiceResult};
 use krc721_database::database::{
-    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, MintHistoryKey,
-    OwnershipHistoryKey, OwnershipKey, ScoredDeployInfoWithCommon, ScoredDiscountKey, StatsDiffs,
-    TokenMintsKey, VipKey, WriteTransaction,
+    AddressHoldingKey, CurrentOwnershipValue, Db, DeploymentKey, ListingByTickKey, ListingUtxoRef,
+    ListingValue, MintHistoryKey, OwnershipHistoryKey, OwnershipKey, ScoredDeployInfoWithCommon,
+    ScoredDiscountKey, StatsDiffs, TokenMintsKey, VipKey, WriteTransaction,
 };
 pub use result::Result;
 use std::num::NonZeroU64;
@@ -473,6 +474,20 @@ impl Processor {
                         // todo should we calculate discounts?
                     })
                     .err(),
+                OperationInfo::List(list_info) => self
+                    .process_list(wtx, tx_score, &operation.common, list_info)?
+                    .inspect(|_| {
+                        diff.security_fees += operation.common.fee;
+                        diff.listings += 1;
+                    })
+                    .err(),
+                OperationInfo::Send(send_info) => self
+                    .process_send(wtx, tx_score, &operation.common, send_info)?
+                    .inspect(|_| {
+                        diff.security_fees += operation.common.fee;
+                        diff.sends += 1;
+                    })
+                    .err(),
             };
 
             let checked_operation = CheckedOperation {
@@ -577,6 +592,12 @@ impl Processor {
                 }
                 OperationInfo::Discount(_) => {
                     // do nothing
+                }
+                OperationInfo::List(_) => {
+                    diff.listings += 1;
+                }
+                OperationInfo::Send(_) => {
+                    diff.sends += 1;
                 }
             }
         }
@@ -1003,6 +1024,22 @@ impl Processor {
             Some(owner) => owner.owner,
         };
 
+        // Block transfer if token is listed for sale
+        if self
+            .db
+            .listings
+            .get_wtx(
+                wtx,
+                &OwnershipKey {
+                    tick: *tick,
+                    token_id: *token_id,
+                },
+            )?
+            .is_some()
+        {
+            return Ok(Err(CtxValidationError::TokenIsListed));
+        }
+
         self.db.ownership_changes.insert_wtx(
             wtx,
             TokenMintsKey::with_seq(tx_score, *tick, *token_id, 0),
@@ -1153,6 +1190,197 @@ impl Processor {
             },
             &(),
         )?;
+        Ok(Ok(()))
+    }
+
+    fn process_list(
+        &self,
+        wtx: &mut WriteTransaction,
+        tx_score: u64,
+        common: &OperationCommon,
+        info: &ListingInfo,
+    ) -> Result<Result<(), CtxValidationError>> {
+        use krc721_core::constants::MIN_LISTING_PRICE;
+
+        // Validate price
+        if info.price < MIN_LISTING_PRICE {
+            return Ok(Err(CtxValidationError::InvalidListingPrice));
+        }
+
+        // Validate tick exists
+        if self
+            .db
+            .collection_registry
+            .get_wtx(wtx, &common.tick)?
+            .is_none()
+        {
+            return Ok(Err(CtxValidationError::TickNotFound));
+        }
+
+        // Validate sender owns the token
+        let owner = self.db.current_ownership.get_wtx(
+            wtx,
+            &OwnershipKey {
+                tick: common.tick,
+                token_id: info.token_id,
+            },
+        )?;
+        match &owner {
+            None => return Ok(Err(CtxValidationError::TokenNotFound)),
+            Some(CurrentOwnershipValue { owner, .. }) if owner != &common.sender => {
+                return Ok(Err(CtxValidationError::WrongOwner));
+            }
+            _ => {}
+        }
+
+        // Validate token is not already listed
+        let listing_key = OwnershipKey {
+            tick: common.tick,
+            token_id: info.token_id,
+        };
+        if self.db.listings.get_wtx(wtx, &listing_key)?.is_some() {
+            return Ok(Err(CtxValidationError::TokenAlreadyListed));
+        }
+
+        // Store the listing
+        let listing_value = ListingValue {
+            price: info.price,
+            seller: common.sender.clone(),
+            listing_tx_id: common.tx_id,
+            utxo_address: info.utxo_address.clone(),
+            redeem_script: info.redeem_script.clone(),
+            op_score: tx_score,
+        };
+
+        self.db.listings.insert_wtx(wtx, listing_key, &listing_value)?;
+
+        // Sorted marketplace index
+        self.db.listings_by_tick.insert_wtx(
+            wtx,
+            ListingByTickKey {
+                tick: common.tick,
+                price: info.price,
+                token_id: info.token_id,
+            },
+            &(),
+        )?;
+
+        // Seller's listings index
+        self.db.address_listings.insert_wtx(
+            wtx,
+            AddressHoldingKey {
+                spk: common.sender.clone(),
+                tick: common.tick,
+                token_id: info.token_id,
+            },
+            &tx_score,
+        )?;
+
+        // UTXO reverse index (for cancel detection)
+        self.db.listing_utxo_index.insert_wtx(
+            wtx,
+            common.tx_id,
+            &ListingUtxoRef {
+                tick: common.tick,
+                token_id: info.token_id,
+            },
+        )?;
+
+        Ok(Ok(()))
+    }
+
+    fn process_send(
+        &self,
+        wtx: &mut WriteTransaction,
+        tx_score: u64,
+        common: &OperationCommon,
+        info: &SendInfo,
+    ) -> Result<Result<(), CtxValidationError>> {
+        let listing_key = OwnershipKey {
+            tick: common.tick,
+            token_id: info.token_id,
+        };
+
+        // Validate listing exists
+        let listing = match self.db.listings.get_wtx(wtx, &listing_key)? {
+            None => return Ok(Err(CtxValidationError::ListingNotFound)),
+            Some(listing) => listing,
+        };
+
+        // Validate input[0] spends the listing UTXO
+        if info.listing_utxo_txid != listing.listing_tx_id {
+            return Ok(Err(CtxValidationError::WrongListingUtxo));
+        }
+
+        // Validate payment >= listing price
+        if info.payment_amount < listing.price {
+            return Ok(Err(CtxValidationError::InsufficientPayment));
+        }
+
+        // Transfer ownership from seller to buyer (same logic as process_transfer)
+        let tick = common.tick;
+        let token_id = info.token_id;
+        let seller = listing.seller.clone();
+        let buyer = &info.buyer;
+
+        self.db.ownership_changes.insert_wtx(
+            wtx,
+            TokenMintsKey::with_seq(tx_score, tick, token_id, 0),
+            &(),
+        )?;
+        self.db.ownership_history.insert_wtx(
+            wtx,
+            OwnershipHistoryKey::with_score(tick, token_id, tx_score),
+            buyer,
+        )?;
+        self.db.current_ownership.insert_wtx(
+            wtx,
+            OwnershipKey { tick, token_id },
+            &CurrentOwnershipValue {
+                owner: buyer.clone(),
+                mod_tx_score: tx_score,
+            },
+        )?;
+        self.db.address_holdings.remove_wtx(
+            wtx,
+            &AddressHoldingKey {
+                spk: seller.clone(),
+                tick,
+                token_id,
+            },
+        )?;
+        self.db.address_holdings.insert_wtx(
+            wtx,
+            AddressHoldingKey {
+                spk: buyer.clone(),
+                tick,
+                token_id,
+            },
+            &tx_score,
+        )?;
+
+        // Clean up listing state
+        self.db.listings.remove_wtx(wtx, &listing_key)?;
+        self.db.listings_by_tick.remove_wtx(
+            wtx,
+            &ListingByTickKey {
+                tick,
+                price: listing.price,
+                token_id,
+            },
+        )?;
+        self.db.address_listings.remove_wtx(
+            wtx,
+            &AddressHoldingKey {
+                spk: seller,
+                tick,
+                token_id,
+            },
+        )?;
+        self.db
+            .listing_utxo_index
+            .remove_wtx(wtx, &listing.listing_tx_id)?;
+
         Ok(Ok(()))
     }
 

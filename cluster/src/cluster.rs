@@ -324,4 +324,36 @@ impl DataT for Cluster {
             .map_err(CoreError::custom)?;
         Ok(Some(response))
     }
+
+    async fn krc721_active_listings(
+        &self,
+        _args: TokenListLookupArgs,
+        _iter_args: IteratorArgs<Score>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, Score>> {
+        // TODO: Implement via RPC
+        Ok(Pagination {
+            data: vec![],
+            next_page_offset: None,
+        })
+    }
+
+    async fn krc721_listing_lookup(
+        &self,
+        _args: TokenLookupArgs,
+    ) -> CoreResult<Option<ListingMetaWrapper>> {
+        // TODO: Implement via RPC
+        Ok(None)
+    }
+
+    async fn krc721_address_listings(
+        &self,
+        _args: AddressListLookupArgs,
+        _iter_args: IteratorArgs<TickTokenOffset>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, TickTokenOffset>> {
+        // TODO: Implement via RPC
+        Ok(Pagination {
+            data: vec![],
+            next_page_offset: None,
+        })
+    }
 }

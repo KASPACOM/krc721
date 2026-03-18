@@ -9,6 +9,8 @@ pub enum Op {
     Mint,
     Transfer,
     Discount,
+    List,
+    Send,
 }
 
 impl std::fmt::Display for Op {
@@ -17,7 +19,9 @@ impl std::fmt::Display for Op {
             Op::Deploy => write!(f, "deploy"),
             Op::Mint => write!(f, "mint"),
             Op::Transfer => write!(f, "transfer"),
-            Op::Discount => write!(f, "transfer"),
+            Op::Discount => write!(f, "discount"),
+            Op::List => write!(f, "list"),
+            Op::Send => write!(f, "send"),
         }
     }
 }

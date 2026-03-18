@@ -126,6 +126,8 @@ impl DataT for Accessor {
             transfers,
             royalty_fees,
             security_fees,
+            listings,
+            sends,
         } = self.inner.db.stats.load(&tx).map_err(CoreError::custom)?;
 
         // Generate new status
@@ -165,6 +167,8 @@ impl DataT for Accessor {
                 token_deployments_total: deployments,
                 token_mints_total: mints,
                 token_transfers_total: transfers,
+                token_listings_total: listings,
+                token_sends_total: sends,
             });
 
             self.inner.last_status_snapshot.store(Some(status.clone()));
@@ -704,6 +708,44 @@ impl DataT for Accessor {
             .map_err(CoreError::custom)?
             .map_err(CoreError::custom)?;
         Ok(ranges)
+    }
+
+    #[instrument(level = "error", skip(self), err)]
+    async fn krc721_active_listings(
+        &self,
+        _args: TokenListLookupArgs,
+        _iter_args: IteratorArgs<Score>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, Score>> {
+        self.track_request();
+        // TODO: Implement listing queries from listings_by_tick partition
+        Ok(Pagination {
+            data: vec![],
+            next_page_offset: None,
+        })
+    }
+
+    #[instrument(level = "error", skip(self), err)]
+    async fn krc721_listing_lookup(
+        &self,
+        _args: TokenLookupArgs,
+    ) -> CoreResult<Option<ListingMetaWrapper>> {
+        self.track_request();
+        // TODO: Implement single listing lookup from listings partition
+        Ok(None)
+    }
+
+    #[instrument(level = "error", skip(self), err)]
+    async fn krc721_address_listings(
+        &self,
+        _args: AddressListLookupArgs,
+        _iter_args: IteratorArgs<TickTokenOffset>,
+    ) -> CoreResult<Pagination<Vec<ListingMetaWrapper>, TickTokenOffset>> {
+        self.track_request();
+        // TODO: Implement address listings from address_listings partition
+        Ok(Pagination {
+            data: vec![],
+            next_page_offset: None,
+        })
     }
 }
 

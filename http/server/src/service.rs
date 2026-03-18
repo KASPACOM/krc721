@@ -224,6 +224,31 @@ impl HttpServer {
             }),
         );
 
+        // Marketplace listing endpoints
+        let data = self.data().clone();
+        router = router.route(
+            &format!("/api/v1/krc721/{network}/listings/{{tick}}"),
+            get(|UrlPath(path), Query(query)| async move {
+                to_pagination(data.krc721_active_listings(path, query).await)
+            }),
+        );
+
+        let data = self.data().clone();
+        router = router.route(
+            &format!("/api/v1/krc721/{network}/listings/{{tick}}/{{id}}"),
+            get(|UrlPath(path)| async move {
+                to_json(data.krc721_listing_lookup(path).await)
+            }),
+        );
+
+        let data = self.data().clone();
+        router = router.route(
+            &format!("/api/v1/krc721/{network}/address/{{address}}/listings"),
+            get(|UrlPath(path), Query(query)| async move {
+                to_pagination(data.krc721_address_listings(path, query).await)
+            }),
+        );
+
         router
     }
 }

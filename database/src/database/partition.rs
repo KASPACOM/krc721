@@ -1143,6 +1143,75 @@ impl SerialToRejectedTxIDPartition {
     }
 }
 
+// ================ MARKETPLACE LISTING PARTITIONS ================
+
+/// Value stored for each active listing
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub struct ListingValue {
+    pub price: u64,
+    pub seller: ScriptPublicKey,
+    pub listing_tx_id: TransactionId,
+    pub utxo_address: ScriptPublicKey,
+    pub redeem_script: Vec<u8>,
+    pub op_score: u64,
+}
+
+/// Primary listing lookup: Key = {tick}:{token_id}
+/// Same key structure as OwnershipKey — one listing per token
+pub type ListingsPartition = Partition<OwnershipKey, ListingValue>;
+
+/// Sorted marketplace view: Key = {tick}:{price}:{token_id}
+/// Allows querying listings for a collection sorted by price (ascending)
+pub struct ListingByTickKey {
+    pub tick: Tick,
+    pub price: u64,
+    pub token_id: u64,
+}
+
+impl Key for ListingByTickKey {
+    type OwnedKey = [u8; size_of::<Tick>() + size_of::<u64>() + size_of::<u64>()];
+
+    fn owned_key(&self) -> Self::OwnedKey {
+        let mut key = [0u8; size_of::<Tick>() + size_of::<u64>() + size_of::<u64>()];
+        let (tick, remaining) = key.split_at_mut(size_of::<Tick>());
+        let (price, token_id) = remaining.split_at_mut(size_of::<u64>());
+        tick.copy_from_slice(&self.tick);
+        price.copy_from_slice(&self.price.to_be_bytes());
+        token_id.copy_from_slice(&self.token_id.to_be_bytes());
+        key
+    }
+
+    fn from_key_bytes(key_bytes: &[u8]) -> Self {
+        let (tick, remaining) = key_bytes.split_at(size_of::<Tick>());
+        let tick = unsafe { Tick::new_unchecked(tick.try_into().unwrap()) };
+        let (price, token_id) = remaining.split_at(size_of::<u64>());
+        let price = u64::from_be_bytes(price.try_into().unwrap());
+        let token_id = u64::from_be_bytes(token_id.try_into().unwrap());
+        Self {
+            tick,
+            price,
+            token_id,
+        }
+    }
+}
+
+pub type ListingsByTickPartition = Partition<ListingByTickKey, ()>;
+
+/// Seller's active listings: Key = {spk}:{tick}:{token_id}
+/// Same key structure as AddressHoldingKey
+pub type AddressListingsPartition = Partition<AddressHoldingKey, ModTxScore>;
+
+/// Value for the UTXO reverse index
+#[derive(Debug, Clone, BorshSerialize, BorshDeserialize)]
+pub struct ListingUtxoRef {
+    pub tick: Tick,
+    pub token_id: u64,
+}
+
+/// Reverse lookup: UTXO txid → ListingUtxoRef
+/// Used to detect when a listing UTXO is spent (for implicit cancellation)
+pub type ListingUtxoIndexPartition = Partition<TransactionId, ListingUtxoRef>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
