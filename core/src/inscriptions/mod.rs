@@ -158,31 +158,32 @@ pub fn reveal_transaction(
 
     let mut unsigned_tx = Transaction::new(
         0,
-        vec![TransactionInput {
-            previous_outpoint: TransactionOutpoint {
+        vec![TransactionInput::new(
+            TransactionOutpoint {
                 transaction_id: prev_tx_tid,
                 index: 0,
             },
-            signature_script: vec![],
-            sequence: 0,
-            sig_op_count: 1, // when signed it turns into 1
-        }],
-        vec![TransactionOutput {
-            value: payback_amount,
-            script_public_key: pay_to_address_script(&recipient),
-        }],
+            vec![],
+            0,
+            1, // when signed it turns into 1
+        )],
+        vec![TransactionOutput::new(
+            payback_amount,
+            pay_to_address_script(&recipient),
+        )],
         0,
         SubnetworkId::from_byte(0),
         0,
         vec![],
     );
 
-    let entries = vec![UtxoEntry {
-        amount: entry_total_amount,
-        script_public_key: redeem_lock_p2sh.clone(),
-        block_daa_score: prev_tx_score,
-        is_coinbase: false,
-    }];
+    let entries = vec![UtxoEntry::new(
+        entry_total_amount,
+        redeem_lock_p2sh.clone(),
+        prev_tx_score,
+        false,
+        None,
+    )];
 
     // Signing the transaction with keypair.
     let tx_clone = unsigned_tx.clone();
@@ -214,6 +215,7 @@ pub fn reveal_transaction(
         script_public_key: redeem_lock_p2sh.clone(),
         block_daa_score: prev_tx_score,
         is_coinbase: false,
+        covenant_id: None,
     };
 
     // Transaction generator
@@ -248,7 +250,7 @@ pub fn reveal_transaction(
         final_transaction_priority_fee: final_priority_fee,
         final_transaction_destination,
         final_transaction_payload,
-        // fee_rate: None,
+        fee_rate: None,
     };
     let generator = Generator::try_new(settings, None, None).unwrap();
 
@@ -304,6 +306,7 @@ mod tests {
     use kaspa_consensus_core::tx::TransactionId;
     use kaspa_consensus_core::tx::VerifiableTransaction;
     use kaspa_txscript::caches::Cache;
+    use kaspa_txscript::EngineCtx;
     use kaspa_txscript::SigCacheKey;
     use kaspa_txscript::TxScriptEngine;
     use kaspa_txscript_errors::TxScriptError;
@@ -451,10 +454,8 @@ mod tests {
                         input,
                         idx,
                         entry,
-                        &reused_values,
-                        &cache,
-                        false,
-                        false,
+                        EngineCtx::new(&cache).with_reused(&reused_values),
+                        Default::default(),
                     )
                     .execute()
                 });

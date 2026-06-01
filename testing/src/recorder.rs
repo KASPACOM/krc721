@@ -29,21 +29,16 @@ impl ConsumerT for Recorder {
     // to isolate Processor data ingest from Nexus logic allowing
     // Processor to receive notifications from different sources.
     fn handle_virtual_chain_changed(
-        &self,
+        self: Arc<Self>,
         VirtualChainChangedNotification {
             removed_chain_block_hashes: _,
-            added_chain_block_hashes,
-            added_acceptance_data,
+            added_chain_block_hashes: _,
+            accepted_transaction_ids: _,
         }: VirtualChainChangedNotification,
     ) -> NexusResult<()> {
-        let mergesets = process_acceptance_data(
-            added_chain_block_hashes.as_slice(),
-            added_acceptance_data.as_slice(),
-            &self.inner.analyzer,
-        );
+        let mergesets = process_acceptance_data(&[], &self.inner.analyzer);
         // TODO - STORE TO TEST DB
 
-        println!("added chain block hashes: {:?}", added_chain_block_hashes);
         println!("scored operations: {:?}", mergesets);
 
         Ok(())
