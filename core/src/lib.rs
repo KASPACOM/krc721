@@ -1,3 +1,5 @@
+extern crate alloc;
+
 pub mod constants;
 pub mod debug;
 pub mod error;

@@ -1,6 +1,6 @@
 use crate::database::Db;
 use crate::imports::*;
-use kaspa_rpc_core::{GetVirtualChainFromBlockResponse, RpcHash};
+use kaspa_rpc_core::{GetVirtualChainFromBlockV2Response, RpcBlock, RpcHash};
 use krc721_core::model::krc721::BlueScoredChainBlockHash;
 use krc721_core::runtime::{Runtime, Service, ServiceResult};
 use std::time::Duration;
@@ -60,11 +60,11 @@ impl BridgeT for Player {
     async fn get_historical_data(
         &self,
         _from: RpcHash,
-    ) -> NexusResult<GetVirtualChainFromBlockResponse> {
-        Ok(GetVirtualChainFromBlockResponse {
-            removed_chain_block_hashes: vec![],
-            added_chain_block_hashes: vec![],
-            added_acceptance_data: vec![],
+    ) -> NexusResult<GetVirtualChainFromBlockV2Response> {
+        Ok(GetVirtualChainFromBlockV2Response {
+            removed_chain_block_hashes: Arc::new(vec![]),
+            added_chain_block_hashes: Arc::new(vec![]),
+            chain_block_accepted_transactions: Arc::new(vec![]),
         })
     }
 
@@ -73,6 +73,16 @@ impl BridgeT for Player {
             blue_score: 0,
             block_hash: Default::default(),
         })
+    }
+
+    async fn get_block(
+        &self,
+        _hash: RpcHash,
+        _include_transactions: bool,
+    ) -> NexusResult<RpcBlock> {
+        Err(krc721_nexus::error::Error::custom(
+            "player bridge does not provide blocks",
+        ))
     }
 }
 

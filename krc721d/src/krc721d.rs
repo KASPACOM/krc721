@@ -318,16 +318,19 @@ impl Server {
 
                     let last_known_block = {
                         let tx = db.read_tx();
-                        let last_known_block_hash = db
-                            .chain_block_scores
-                            .last_accepted_block_rtx(&tx)?
-                            .map(|v| v.block_hash);
-                        if last_known_block_hash.is_none() {
+                        let last_known_block =
+                            db.chain_block_scores.last_accepted_block_rtx(&tx)?;
+                        if last_known_block.is_none() {
                             warn!("no last known block hash found in the database");
                         }
-                        last_known_block_hash
+                        last_known_block
                     }
-                    .or(genesis_block_hash);
+                    .or_else(|| {
+                        genesis_block_hash.map(|block_hash| BlueScoredChainBlockHash {
+                            blue_score: 0,
+                            block_hash,
+                        })
+                    });
 
                     if last_known_block.is_none() {
                         warn!("no last known block hash found for network: `{}`", network);
