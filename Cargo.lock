@@ -123,7 +123,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -134,7 +134,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1970,7 +1970,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2702,7 +2702,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3026,8 +3026,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-addresses"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "js-sys",
@@ -3041,8 +3041,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-addressmanager"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "igd-next",
@@ -3063,16 +3063,16 @@ dependencies = [
 
 [[package]]
 name = "kaspa-alloc"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "mimalloc",
 ]
 
 [[package]]
 name = "kaspa-bip32"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "bs58",
@@ -3098,8 +3098,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-build-info"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "duct",
  "faster-hex",
@@ -3107,8 +3107,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-connectionmanager"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "duration-string",
  "futures-util",
@@ -3125,8 +3125,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensus"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "arc-swap",
  "async-channel 2.5.0",
@@ -3169,8 +3169,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensus-client"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "ahash",
  "borsh",
@@ -3199,8 +3199,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensus-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3238,8 +3238,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensus-notify"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "cfg-if 1.0.4",
@@ -3258,8 +3258,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensus-wasm"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "cfg-if 1.0.4",
  "faster-hex",
@@ -3283,8 +3283,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-consensusmanager"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "duration-string",
  "futures",
@@ -3303,8 +3303,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "anyhow",
  "cfg-if 1.0.4",
@@ -3323,8 +3323,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-database"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "bincode",
  "enum-primitive-derive",
@@ -3346,8 +3346,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-grpc-client"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
@@ -3379,8 +3379,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-grpc-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
@@ -3411,8 +3411,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-grpc-server"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-stream",
@@ -3447,8 +3447,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-hashes"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "blake2b_simd",
  "blake3",
@@ -3468,8 +3468,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-index-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -3488,8 +3488,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-index-processor"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -3514,8 +3514,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-math"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "faster-hex",
@@ -3534,16 +3534,16 @@ dependencies = [
 
 [[package]]
 name = "kaspa-merkle"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-hashes",
 ]
 
 [[package]]
 name = "kaspa-metrics-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-trait",
  "borsh",
@@ -3559,8 +3559,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-mining"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "futures-util",
  "itertools 0.13.0",
@@ -3585,8 +3585,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-mining-errors"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-consensus-core",
  "thiserror 2.0.18",
@@ -3594,8 +3594,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-muhash"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-hashes",
  "kaspa-math",
@@ -3605,8 +3605,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-notify"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -3637,8 +3637,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-p2p-flows"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3674,8 +3674,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-p2p-lib"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "ctrlc",
@@ -3706,8 +3706,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-p2p-mining"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-consensus-core",
  "kaspa-consensusmanager",
@@ -3724,8 +3724,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-perf-monitor"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-core",
  "log",
@@ -3737,8 +3737,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-pow"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "js-sys",
  "kaspa-consensus-client",
@@ -3753,8 +3753,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-rpc-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "async-trait",
@@ -3795,8 +3795,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-rpc-macros"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "convert_case 0.6.0",
  "proc-macro-error",
@@ -3808,8 +3808,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-rpc-service"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-trait",
  "kaspa-addresses",
@@ -3840,8 +3840,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-seq-commit"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-hashes",
  "kaspa-merkle",
@@ -3851,8 +3851,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-smt"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "blake3",
  "kaspa-hashes",
@@ -3862,8 +3862,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-smt-store"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-consensus-core",
  "kaspa-core",
@@ -3882,8 +3882,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-system-info"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "kaspa-utils",
  "mac_address",
@@ -3894,8 +3894,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-txscript"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -3938,8 +3938,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-txscript-errors"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "borsh",
  "kaspa-hashes",
@@ -3949,8 +3949,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-utils"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "arc-swap",
  "async-channel 2.5.0",
@@ -3975,8 +3975,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-utils-tower"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "bytes",
  "cfg-if 1.0.4",
@@ -3992,8 +3992,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-utxoindex"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "futures",
  "kaspa-consensus-core",
@@ -4012,8 +4012,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wallet-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "aes",
  "ahash",
@@ -4090,8 +4090,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wallet-keys"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-trait",
  "borsh",
@@ -4123,8 +4123,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wallet-macros"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "convert_case 0.5.0",
  "proc-macro-error",
@@ -4137,8 +4137,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wallet-pskt"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "bincode",
  "derive_builder",
@@ -4166,8 +4166,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wasm"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "cfg-if 1.0.4",
  "js-sys",
@@ -4195,8 +4195,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wasm-core"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "faster-hex",
  "hexplay",
@@ -4207,8 +4207,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wrpc-client"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-lock",
  "async-trait",
@@ -4244,8 +4244,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wrpc-server"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-trait",
  "borsh",
@@ -4273,8 +4273,8 @@ dependencies = [
 
 [[package]]
 name = "kaspa-wrpc-wasm"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "ahash",
  "async-lock",
@@ -4304,8 +4304,8 @@ dependencies = [
 
 [[package]]
 name = "kaspad"
-version = "1.2.1-toc.3"
-source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#1015a62359e0d06e0b3b3b7f7d06bc1bd4bf0c1b"
+version = "1.2.0-toc.2"
+source = "git+https://github.com/kaspanet/rusty-kaspa.git?branch=tn10#f1d1a1ae6a4131a3d6124fef443192323c1c382f"
 dependencies = [
  "async-channel 2.5.0",
  "cfg-if 1.0.4",
@@ -4914,9 +4914,9 @@ dependencies = [
 
 [[package]]
 name = "libredox"
-version = "0.1.17"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f02ab6bace2054fb888a3c16f990117b579d14a3088e472d63c6011fa185c9d3"
+checksum = "e02f3bb43d335493c96bf3fd3a321600bf6bd07ed34bc64118e9293bdffea46c"
 dependencies = [
  "libc",
 ]
@@ -5311,9 +5311,9 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "1.2.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02bd0af71c67b473010cbbc60715ee815645a4dc942899111f494b4b737d6fda"
+checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
 dependencies = [
  "libc",
  "wasi",
@@ -5460,7 +5460,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5718,7 +5718,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -6031,7 +6031,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.12+spec-1.1.0",
+ "toml_edit 0.25.11+spec-1.1.0",
 ]
 
 [[package]]
@@ -6750,7 +6750,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7257,12 +7257,12 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
 name = "socket2"
-version = "0.6.4"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
+checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7562,10 +7562,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7584,7 +7584,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7914,9 +7914,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.25.12+spec-1.1.0"
+version = "0.25.11+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2153edc6955a6c354fad8f5efd38b6a8769bdccf9fe50f8e1329f81b0baa5d7"
+checksum = "0b59c4d22ed448339746c59b905d24568fcbb3ab65a500494f7b8c3e97739f2b"
 dependencies = [
  "indexmap 2.14.0",
  "toml_datetime 1.1.1+spec-1.1.0",
@@ -8717,7 +8717,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -8732,7 +8732,7 @@ version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
 dependencies = [
- "windows-core",
+ "windows-core 0.57.0",
  "windows-targets 0.52.6",
 ]
 
@@ -8742,10 +8742,23 @@ version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
 dependencies = [
- "windows-implement",
- "windows-interface",
+ "windows-implement 0.57.0",
+ "windows-interface 0.57.0",
  "windows-result 0.1.2",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
+version = "0.62.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
+dependencies = [
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
+ "windows-link",
+ "windows-result 0.4.1",
+ "windows-strings",
 ]
 
 [[package]]
@@ -8760,10 +8773,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-implement"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.59.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9594,18 +9629,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.49"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bce33a6288fa3f072a8c2c7d0f2fdbb90e28298f0135c1f99b96c3db2efcc60b"
+checksum = "eed437bf9d6692032087e337407a86f04cd8d6a16a37199ed57949d415bd68e9"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.49"
+version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fd425244944f4ab65ccff928e7323354c5a018c75838362fdce749dfad2ee1e"
+checksum = "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4"
 dependencies = [
  "proc-macro2",
  "quote",
