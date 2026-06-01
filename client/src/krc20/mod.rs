@@ -61,7 +61,7 @@ pub mod v1 {
                 }
 
                 let len = result.len();
-                list.extend(result.into_iter());
+                list.extend(result);
                 if len < 50 {
                     break;
                 } else {

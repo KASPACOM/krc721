@@ -134,11 +134,11 @@ impl EndpointMetrics {
         LatencyStats {
             min_nanos: self.min_nanos.load(Ordering::Relaxed),
             max_nanos: self.max_nanos.load(Ordering::Relaxed),
-            avg_nanos: if count > 0 {
-                self.sum_ms.load(Ordering::Relaxed) / count
-            } else {
-                0
-            },
+            avg_nanos: self
+                .sum_ms
+                .load(Ordering::Relaxed)
+                .checked_div(count)
+                .unwrap_or(0),
             count,
         }
     }
