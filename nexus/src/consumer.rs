@@ -2,7 +2,7 @@ use crate::imports::*;
 
 pub trait ConsumerT: Send + Sync + 'static {
     fn handle_virtual_chain_changed(
-        self: Arc<Self>,
+        &self,
         notification: VirtualChainChangedNotification,
     ) -> Result<()>;
 

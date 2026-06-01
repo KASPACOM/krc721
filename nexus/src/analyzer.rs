@@ -949,16 +949,16 @@ mod tests {
         fn new(signature_script: Vec<u8>) -> Self {
             let tx = Transaction::new(
                 0,
-                vec![TransactionInput::new(
-                    TransactionOutpoint::new(Default::default(), 0),
-                    signature_script.clone(),
-                    0,
-                    1,
-                )],
-                vec![TransactionOutput::new(
-                    1000,
-                    ScriptPublicKey::new(0, vec![0u8; 32].into()),
-                )],
+                vec![TransactionInput {
+                    previous_outpoint: TransactionOutpoint::new(Default::default(), 0),
+                    signature_script: signature_script.clone(),
+                    sequence: 0,
+                    sig_op_count: 1,
+                }],
+                vec![TransactionOutput {
+                    value: 1000,
+                    script_public_key: ScriptPublicKey::new(0, vec![0u8; 32].into()),
+                }],
                 0,
                 SubnetworkId::default(),
                 0,
@@ -1291,12 +1291,12 @@ mod tests {
 
     #[test]
     fn test_dwayne() {
-        let input = TransactionInput::new(
-            TransactionOutpoint { transaction_id: TransactionId::from(hex!("c2b4c554f38077e5ecdfc5f3b33d09e70fd7b53c35aa869cea56e7fbefa6114c")), index: 0 },
-            hex!("414b5913f9929e7e44ce94f3b0b173bffa063f21f74eee35a7715537a8791d528aed5ddffdae2d08897b86d405d86f220c844266928ef038197c54c853ae14ed88014cac2012b5a221b90917f255669f0eef86c99c9f5477811307c06ac378a37a8bc74246ac0063046b7370725100004c7d7b226d6178223a223130303030222c226d65746164617461223a22697066733a2f2f516d5a6348345976425656524a74646e3452646261716773704655386748365039766f6d4470425670414c337534222c226f70223a226465706c6f79222c2270223a226b72632d373231222c227469636b223a226d65696b72227d68").to_vec(),
-            0,
-            1,
-        );
+        let input =  TransactionInput{
+            previous_outpoint:TransactionOutpoint{ transaction_id: TransactionId::from(hex!("c2b4c554f38077e5ecdfc5f3b33d09e70fd7b53c35aa869cea56e7fbefa6114c")), index: 0 },
+            signature_script: hex!("414b5913f9929e7e44ce94f3b0b173bffa063f21f74eee35a7715537a8791d528aed5ddffdae2d08897b86d405d86f220c844266928ef038197c54c853ae14ed88014cac2012b5a221b90917f255669f0eef86c99c9f5477811307c06ac378a37a8bc74246ac0063046b7370725100004c7d7b226d6178223a223130303030222c226d65746164617461223a22697066733a2f2f516d5a6348345976425656524a74646e3452646261716773704655386748365039766f6d4470425670414c337534222c226f70223a226465706c6f79222c2270223a226b72632d373231222c227469636b223a226d65696b72227d68").to_vec(),
+            sequence: 0,
+            sig_op_count: 1,
+        };
         let tx = Transaction::new(0, vec![input], vec![], 0, SUBNETWORK_ID_NATIVE, 0, vec![]);
         let tx = ContextTransaction {
             tx,
@@ -1340,12 +1340,12 @@ mod tests {
         fn with_outputs(signature_script: Vec<u8>, outputs: Vec<TransactionOutput>) -> Self {
             let tx = Transaction::new(
                 0,
-                vec![TransactionInput::new(
-                    TransactionOutpoint::new(Default::default(), 0),
-                    signature_script.clone(),
-                    0,
-                    1,
-                )],
+                vec![TransactionInput {
+                    previous_outpoint: TransactionOutpoint::new(Default::default(), 0),
+                    signature_script: signature_script.clone(),
+                    sequence: 0,
+                    sig_op_count: 1,
+                }],
                 outputs,
                 0,
                 SubnetworkId::default(),
@@ -1413,10 +1413,10 @@ mod tests {
         // Use a dummy P2SH output (validation of P2SH correctness is in the processor)
         let tx = TestTransaction::with_outputs(
             script,
-            vec![TransactionOutput::new(
-                1_500_000_000,
-                ScriptPublicKey::new(0, vec![0u8; 34].into()),
-            )],
+            vec![TransactionOutput {
+                value: 1_500_000_000,
+                script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+            }],
         );
 
         let result = detect_krc721(&tx);
@@ -1438,10 +1438,10 @@ mod tests {
         let script = create_test_inscription(list_op);
         let tx = TestTransaction::with_outputs(
             script,
-            vec![TransactionOutput::new(
-                1_500_000_000,
-                ScriptPublicKey::new(0, vec![0u8; 34].into()),
-            )],
+            vec![TransactionOutput {
+                value: 1_500_000_000,
+                script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+            }],
         );
         let result = detect_krc721(&tx);
         assert!(matches!(
@@ -1463,21 +1463,21 @@ mod tests {
         // Send needs: input[0] with previous outpoint, output[0] = payment, output[1] = buyer
         let tx = TestTransaction::with_inputs_outputs(
             script.clone(),
-            vec![TransactionInput::new(
-                TransactionOutpoint::new(listing_txid, 0),
-                script,
-                0,
-                1,
-            )],
+            vec![TransactionInput {
+                previous_outpoint: TransactionOutpoint::new(listing_txid, 0),
+                signature_script: script,
+                sequence: 0,
+                sig_op_count: 1,
+            }],
             vec![
-                TransactionOutput::new(
-                    1_500_000_000, // payment to seller
-                    ScriptPublicKey::new(0, vec![10u8; 34].into()),
-                ),
-                TransactionOutput::new(
-                    500_000_000, // change to buyer
-                    ScriptPublicKey::new(0, vec![20u8; 34].into()),
-                ),
+                TransactionOutput {
+                    value: 1_500_000_000, // payment to seller
+                    script_public_key: ScriptPublicKey::new(0, vec![10u8; 34].into()),
+                },
+                TransactionOutput {
+                    value: 500_000_000, // change to buyer
+                    script_public_key: ScriptPublicKey::new(0, vec![20u8; 34].into()),
+                },
             ],
         );
 
@@ -1508,11 +1508,14 @@ mod tests {
         let tx = TestTransaction::with_outputs(
             script,
             vec![
-                TransactionOutput::new(
-                    1_500_000_000,
-                    ScriptPublicKey::new(0, vec![0u8; 34].into()),
-                ),
-                TransactionOutput::new(500, ScriptPublicKey::new(0, vec![1u8; 34].into())),
+                TransactionOutput {
+                    value: 1_500_000_000,
+                    script_public_key: ScriptPublicKey::new(0, vec![0u8; 34].into()),
+                },
+                TransactionOutput {
+                    value: 500,
+                    script_public_key: ScriptPublicKey::new(0, vec![1u8; 34].into()),
+                },
             ],
         );
         let result = detect_krc721(&tx);

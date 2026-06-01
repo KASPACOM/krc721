@@ -1,6 +1,6 @@
 use crate::database::Db;
 use crate::imports::*;
-use kaspa_rpc_core::{GetVirtualChainFromBlockV2Response, RpcHash};
+use kaspa_rpc_core::{GetVirtualChainFromBlockResponse, RpcHash};
 use krc721_core::model::krc721::BlueScoredChainBlockHash;
 use krc721_core::runtime::{Runtime, Service, ServiceResult};
 use std::time::Duration;
@@ -60,11 +60,11 @@ impl BridgeT for Player {
     async fn get_historical_data(
         &self,
         _from: RpcHash,
-    ) -> NexusResult<GetVirtualChainFromBlockV2Response> {
-        Ok(GetVirtualChainFromBlockV2Response {
-            removed_chain_block_hashes: Arc::new(vec![]),
-            added_chain_block_hashes: Arc::new(vec![]),
-            chain_block_accepted_transactions: Arc::new(vec![]),
+    ) -> NexusResult<GetVirtualChainFromBlockResponse> {
+        Ok(GetVirtualChainFromBlockResponse {
+            removed_chain_block_hashes: vec![],
+            added_chain_block_hashes: vec![],
+            added_acceptance_data: vec![],
         })
     }
 

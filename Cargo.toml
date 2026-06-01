@@ -51,25 +51,25 @@ krc721-rs = { path = "client" }
 krc721-wasm = { path = "wasm" }
 krc721d = { path = "krc721d" }
 
-kaspa-addresses = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-bip32 = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-consensus-client = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-consensus-wasm = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-notify = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-rpc-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-txscript = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-txscript-errors = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-utils = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wallet-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wallet-keys = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wasm = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wasm-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wrpc-client = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-wrpc-wasm = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspa-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
-kaspad = { git = "https://github.com/kaspanet/rusty-kaspa.git", branch = "tn10" }
+kaspa-addresses = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-bip32 = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-client = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-consensus-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-hashes = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-notify = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-rpc-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-txscript = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-txscript-errors = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-utils = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wallet-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wallet-keys = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wasm-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wrpc-client = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-wrpc-wasm = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspa-core = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
+kaspad = { git = "https://github.com/aspectron/rusty-kaspa.git", branch = "gvcfb-v254" }
 
 workflow-core = "0.18.0"
 workflow-http = "0.18.0"
@@ -106,7 +106,8 @@ dashmap = "6.1.0"
 dirs = "5.0.1"
 downcast-rs = "1.2.1"
 faster-hex = "0.9.0" # keep at 0.9.0
-value-log = "=1.4.1"
+# lsm-tree = "2.5.0"
+# value-log = "=1.4.1"
 fjall = { version = "2.5.0", default-features = false, features = ["ssi_tx", "lz4", "bloom", "bytes"]}
 flate2 = "1.0.0"
 futures = "0.3.31"

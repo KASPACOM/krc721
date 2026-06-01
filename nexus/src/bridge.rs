@@ -1,14 +1,11 @@
 use crate::imports::*;
-use kaspa_rpc_core::{GetVirtualChainFromBlockV2Response, RpcDataVerbosityLevel, RpcHash};
+use kaspa_rpc_core::{GetVirtualChainFromBlockResponse, RpcHash};
 use kaspa_wallet_core::rpc::DynRpcApi;
 use krc721_core::model::krc721::BlueScoredChainBlockHash;
 
 #[async_trait]
 pub trait BridgeT: Send + Sync + 'static {
-    async fn get_historical_data(
-        &self,
-        from: RpcHash,
-    ) -> Result<GetVirtualChainFromBlockV2Response>;
+    async fn get_historical_data(&self, from: RpcHash) -> Result<GetVirtualChainFromBlockResponse>;
     async fn get_sink(&self) -> Result<BlueScoredChainBlockHash>;
 }
 
@@ -27,15 +24,12 @@ impl RpcBridge {
 
 #[async_trait]
 impl BridgeT for RpcBridge {
-    async fn get_historical_data(
-        &self,
-        from: RpcHash,
-    ) -> Result<GetVirtualChainFromBlockV2Response> {
+    async fn get_historical_data(&self, from: RpcHash) -> Result<GetVirtualChainFromBlockResponse> {
         let info = self.rpc_api.get_info().await?;
         if info.is_synced {
             Ok(self
                 .rpc_api
-                .get_virtual_chain_from_block_v2(from, Some(RpcDataVerbosityLevel::Full), None)
+                .get_virtual_chain_from_block(from, true)
                 .await?)
         } else {
             Err(Error::NodeNotSynced)

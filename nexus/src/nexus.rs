@@ -16,7 +16,7 @@ use kaspa_notify::{
     scope::{Scope, VirtualChainChangedScope, VirtualDaaScoreChangedScope},
 };
 use kaspa_wrpc_client::prelude::{ConnectOptions, KaspaRpcClient};
-use krc721_core::model::krc721::{BlueScoredChainBlockHash, DataT};
+use krc721_core::model::krc721::DataT;
 use tracing::{error, info, info_span, Instrument};
 
 pub enum NexusMode {
@@ -187,17 +187,8 @@ impl Nexus {
                     .get_block_dag_info()
                     .await?
                     .pruning_point_hash;
-                let blue_score = self
-                    .rpc_api()
-                    .get_block(last_known_block_hash, false)
-                    .await?
-                    .header
-                    .blue_score;
                 warn!("initializing syncer with last pruning point hash: {last_known_block_hash}");
-                syncer.clone().spawn(BlueScoredChainBlockHash {
-                    blue_score,
-                    block_hash: last_known_block_hash,
-                });
+                syncer.clone().spawn(last_known_block_hash);
             }
         }
 
@@ -305,7 +296,6 @@ impl Nexus {
 
         self.inner
             .consumer
-            .clone()
             .handle_virtual_chain_changed(notification)?;
         Ok(())
     }

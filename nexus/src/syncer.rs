@@ -7,8 +7,7 @@ use crate::state::State;
 use ahash::AHashMap;
 use kaspa_consensus_core::tx::ScriptPublicKey;
 use kaspa_rpc_core::{
-    GetVirtualChainFromBlockV2Response, RpcChainBlockAcceptedTransactions, RpcHash,
-    RpcOptionalTransaction, VirtualChainChangedNotification,
+    GetVirtualChainFromBlockResponse, RpcAcceptanceData, RpcHash, VirtualChainChangedNotification,
 };
 use krc721_core::model::krc721::{
     BlueScoredChainBlockHash, Mergeset, MergesetOperation, VirtualChainChanges,
@@ -47,7 +46,7 @@ impl SyncerT for Syncer {
         *self.last_known_block.lock().unwrap()
     }
 
-    fn spawn(self: Arc<Self>, last_known_block: BlueScoredChainBlockHash) {
+    fn spawn(self: Arc<Self>, last_known_block: RpcHash) {
         self.spawn_sync_task(last_known_block);
     }
 
@@ -109,33 +108,10 @@ impl Syncer {
                 .unwrap()
                 .expect("last known block is not set");
             info!("Syncing from block: {:?}", from);
-
-            if from >= sink {
-                info!("last known block is at or beyond sync target, state is synced");
-                let notification = VirtualChainChanges {
-                    removed_chain_block_hashes: Arc::new(vec![]),
-                    mergesets: vec![],
-                };
-                if let Err(err) = self
-                    .processor
-                    .send_historical_virtual_chain_changed_notification_and_apply_queue(
-                        notification,
-                    )
-                    .map_err(|_| Error::SendError)
-                {
-                    error!("Failed to apply queued notification after sync: {:?}", err);
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    continue;
-                }
-                self.is_synced.store(true, Ordering::SeqCst);
-                *self.target.lock().unwrap() = None;
-                break;
-            }
-
-            let Ok(GetVirtualChainFromBlockV2Response {
+            let Ok(GetVirtualChainFromBlockResponse {
                 removed_chain_block_hashes,
                 added_chain_block_hashes,
-                chain_block_accepted_transactions,
+                added_acceptance_data,
             }) = self
                 .bridge
                 .get_historical_data(from.block_hash)
@@ -152,9 +128,10 @@ impl Syncer {
                     sink
                 });
                 info!("Target: {:?}", target);
-                if chain_block_accepted_transactions.iter().any(|d| {
-                    d.chain_block_header.blue_score.unwrap_or_default() >= target.blue_score
-                }) {
+                if added_acceptance_data
+                    .iter()
+                    .any(|d| d.accepting_blue_score >= target.blue_score)
+                {
                     info!("added_chain_block_hashes contains target, target is reached");
                     true
                 } else {
@@ -162,23 +139,22 @@ impl Syncer {
                 }
             };
             let last_known_block = BlueScoredChainBlockHash {
-                blue_score: chain_block_accepted_transactions
+                blue_score: added_acceptance_data
                     .last()
-                    .and_then(|v| v.chain_block_header.blue_score)
+                    .map(|v| v.accepting_blue_score)
                     .unwrap_or(from.blue_score),
-                block_hash: chain_block_accepted_transactions
-                    .last()
-                    .and_then(|v| v.chain_block_header.hash)
-                    .or_else(|| added_chain_block_hashes.last().copied())
-                    .unwrap_or(from.block_hash),
+                block_hash: *added_chain_block_hashes.last().unwrap_or(&from.block_hash),
             };
 
-            let mergesets =
-                process_acceptance_data(&chain_block_accepted_transactions, &self.analyzer);
+            let mergesets = process_acceptance_data(
+                &added_chain_block_hashes,
+                &added_acceptance_data,
+                &self.analyzer,
+            );
 
             let notification = VirtualChainChanges {
                 // who cares about that arc?? no one
-                removed_chain_block_hashes,
+                removed_chain_block_hashes: Arc::new(removed_chain_block_hashes),
                 mergesets,
             };
 
@@ -235,12 +211,15 @@ impl Syncer {
         });
     }
 
-    fn spawn_sync_task(self: &Arc<Self>, last_known_block: BlueScoredChainBlockHash) {
+    fn spawn_sync_task(self: &Arc<Self>, last_known_block: RpcHash) {
         let mut last_known_block_guard = self.last_known_block.lock().unwrap();
         if last_known_block_guard.is_some() {
             panic!("syncer is already initialized with last known block");
         }
-        last_known_block_guard.replace(last_known_block);
+        last_known_block_guard.replace(BlueScoredChainBlockHash {
+            blue_score: 0,
+            block_hash: last_known_block,
+        });
         self.spawn_sync_task_impl();
     }
 }
@@ -251,22 +230,47 @@ impl ConsumerT for Syncer {
     // Processor to receive notifications from different sources.
     #[instrument(skip_all)]
     fn handle_virtual_chain_changed(
-        self: Arc<Self>,
+        &self,
         VirtualChainChangedNotification {
-            removed_chain_block_hashes: _,
-            added_chain_block_hashes: _,
-            accepted_transaction_ids: _,
+            removed_chain_block_hashes,
+            added_chain_block_hashes,
+            added_acceptance_data,
         }: VirtualChainChangedNotification,
     ) -> Result<()> {
+        let last_known_block = added_acceptance_data.last().and_then(|d| {
+            added_chain_block_hashes
+                .last()
+                .cloned()
+                .map(|block_hash| BlueScoredChainBlockHash {
+                    blue_score: d.accepting_blue_score,
+                    block_hash,
+                })
+        });
+        let mergesets = process_acceptance_data(
+            &added_chain_block_hashes,
+            &added_acceptance_data,
+            &self.analyzer,
+        );
+
+        let notification = VirtualChainChanges {
+            removed_chain_block_hashes,
+            mergesets,
+        };
+
         if self.is_synced.load(std::sync::atomic::Ordering::SeqCst) {
-            self.processor
-                .switch_to_queue_mod()
-                .map_err(|_| Error::SendError)?;
-            self.is_synced.store(false, Ordering::SeqCst);
-            self.spawn_sync_task_impl();
+            if let Some(last_known_block) = last_known_block {
+                if let Some(v) = self.last_known_block.lock().unwrap().as_mut() {
+                    if last_known_block > *v {
+                        *v = last_known_block;
+                        debug!(target: "last_known_block_tracking", "Last known block is updated to: {:?}", last_known_block);
+                    }
+                }
+            }
         }
 
-        Ok(())
+        self.processor
+            .send_realtime_virtual_chain_changed_notification(notification)
+            .map_err(|_| Error::SendError)
     }
 
     fn disconnected(self: Arc<Self>) -> Result<()> {
@@ -283,77 +287,78 @@ impl ConsumerT for Syncer {
 }
 
 pub fn process_acceptance_data(
-    chain_block_accepted_transactions: &[RpcChainBlockAcceptedTransactions],
+    added_chain_block_hashes: &[RpcHash],
+    added_acceptance_data: &[RpcAcceptanceData],
     analyzer: &Analyzer,
 ) -> Vec<Mergeset> {
     let mut collected_mergesets = Vec::new();
 
-    for accepted in chain_block_accepted_transactions {
+    for (block_hash, mergeset) in added_chain_block_hashes.iter().zip(added_acceptance_data) {
         let mut entropy_builder = MergesetEntropyBuilder::default();
-        let accepting_block_blue_score = accepted.chain_block_header.blue_score.unwrap_or_default();
-        let accepting_block_daa_score = accepted.chain_block_header.daa_score.unwrap_or_default();
-        let accepted_chain_block_hash = accepted.chain_block_header.hash.unwrap_or_default();
-        let mut merged_block_indexes = AHashMap::<RpcHash, usize>::new();
-        let mut merged_block_tx_counts = AHashMap::<RpcHash, usize>::new();
+        let accepting_block_blue_score = mergeset.accepting_blue_score;
+        let accepting_block_daa_score = mergeset.accepting_daa_score;
+
+        // Process all blocks in the mergeset for entropy
+        for block_acceptance in &mergeset.mergeset_block_acceptance_data {
+            entropy_builder.add_block_hash(&block_acceptance.merged_block_hash);
+        }
 
         // Process transactions for operations
-        let operations = accepted
-            .accepted_transactions
+        let operations = mergeset
+            .mergeset_block_acceptance_data
             .iter()
-            .filter_map(|rpc_tx| {
-                let verbose_data = rpc_tx.verbose_data.as_ref();
-                let merged_block_hash = verbose_data.and_then(|v| v.block_hash).unwrap_or_default();
-                let block_time = verbose_data.and_then(|v| v.block_time).unwrap_or_default();
-                let next_index = merged_block_indexes.len();
-                let block_index_within_mergeset = *merged_block_indexes
-                    .entry(merged_block_hash)
-                    .or_insert_with(|| {
-                        entropy_builder.add_block_hash(&merged_block_hash);
-                        next_index
-                    });
-                let tx_index_within_merged_block =
-                    merged_block_tx_counts.entry(merged_block_hash).or_default();
-                let index_within_merged_block = *tx_index_within_merged_block;
-                *tx_index_within_merged_block += 1;
-
-                let fee = rpc_transaction_fee(rpc_tx);
-                let tx = Transaction::try_from(rpc_tx.clone())
-                    .inspect_err(|err| error!("failed to convert rpcTx to tx with err: {err}"))
-                    .ok()?;
-                let ctx_tx = ContextTransaction {
-                    tx,
-                    fee,
-                    block_time,
-                    accepting_block_daa_score,
-                    index_within_merged_block,
-                };
-
-                analyzer
-                    .detect_krc721(&ctx_tx)
-                    .map_err(|err| (ctx_tx.tx.id(), err))
-                    .inspect_err(|(txid, err)| {
-                        error!("{txid} - detect krc721 error: {err}");
-                        if let Some(db) = analyzer.db() {
-                            let txid = *txid;
-                            let reason = err.to_string();
-                            let db = db.clone();
-                            spawn_blocking(move || {
-                                let mut wtx = db.write_tx();
-                                _ = db.reject_tx(&mut wtx, txid, &reason).inspect_err(|err| {
-                                    error!("failed to store transaction rejection in db: {err}")
-                                });
-                                let _ = wtx.commit().inspect_err(|err| {
-                                    error!("failed to commit rejected transaction wtx in db: {err}")
-                                });
-                            });
-                        }
+            .enumerate()
+            .flat_map(|(block_index_within_mergeset, acceptance_data)| {
+                let block_time = acceptance_data.merged_block_timestamp;
+                acceptance_data
+                    .accepted_transactions
+                    .iter()
+                    .enumerate()
+                    .map(move |(tx_index_within_merged_block, rpc_tx)| {
+                        let fee = rpc_tx.fee;
+                        let tx = Transaction::try_from(rpc_tx.clone());
+                        tx.map(|tx| ContextTransaction {
+                            tx,
+                            fee,
+                            block_time,
+                            accepting_block_daa_score,
+                            index_within_merged_block: tx_index_within_merged_block,
+                        })
                     })
-                    .ok()
-                    .flatten()
-                    .map(|operation| MergesetOperation {
+                    .map(|tx| {
+                        tx.map(|tx| analyzer.detect_krc721(&tx).map(|op| op.map(|op| (op, tx.index_within_merged_block))).map_err(|err| (tx.tx.id(), err)))
+                    })
+                    .filter_map(|r| {
+                        r.inspect_err(|err| error!("failed to convert rpcTx to tx with err: {err}"))
+                            .ok()
+                            .transpose()
+                            .inspect_err(|(txid, err)| {
+                                error!("{txid} - detect krc721 error: {err}");
+                                if let Some(db) = analyzer.db() {
+                                    let txid = *txid;
+                                    let reason = err.to_string();
+                                    let db = db.clone();
+                                    spawn_blocking(move || {
+                                        let mut wtx = db.write_tx();
+                                        _ = db
+                                            .reject_tx(&mut wtx, txid, &reason)
+                                            .inspect_err(|err| {
+                                                error!("failed to store transaction rejection in db: {err}")
+                                            });
+                                        let _ = wtx.commit().inspect_err(|err| {
+                                            error!("failed to commit rejected transaction wtx in db: {err}")
+                                        });
+                                    });
+                                }
+                            })
+                            .ok()
+                            .flatten()
+                            .flatten()
+                    })
+                    .map(move |(operation, tx_index_within_merged_block)| MergesetOperation {
                         block_index_within_mergeset,
                         operation,
-                        index_within_merged_block,
+                        index_within_merged_block: tx_index_within_merged_block,
                     })
             })
             .collect();
@@ -362,27 +367,11 @@ pub fn process_acceptance_data(
             operations,
             entropy: entropy_builder.finalize(),
             blue_score: accepting_block_blue_score,
-            accepted_chain_block_hash,
+            accepted_chain_block_hash: *block_hash,
         });
     }
 
     collected_mergesets
-}
-
-fn rpc_transaction_fee(tx: &RpcOptionalTransaction) -> u64 {
-    let input_sum = tx
-        .inputs
-        .iter()
-        .filter_map(|input| input.verbose_data.as_ref())
-        .filter_map(|verbose| verbose.utxo_entry.as_ref())
-        .filter_map(|utxo| utxo.amount)
-        .sum::<u64>();
-    let output_sum = tx
-        .outputs
-        .iter()
-        .filter_map(|output| output.value)
-        .sum::<u64>();
-    input_sum.saturating_sub(output_sum)
 }
 
 #[derive(Default)]
@@ -406,6 +395,6 @@ impl MergesetEntropyBuilder {
 pub trait SyncerT: Send + Sync + 'static {
     fn is_synced(&self) -> bool;
     fn last_known_block(&self) -> Option<BlueScoredChainBlockHash>;
-    fn spawn(self: Arc<Self>, last_known_block: BlueScoredChainBlockHash);
+    fn spawn(self: Arc<Self>, last_known_block: RpcHash);
     fn shutdown(&self);
 }
