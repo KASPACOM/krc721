@@ -33,6 +33,7 @@ pub struct Syncer {
     last_known_block: Mutex<Option<BlueScoredChainBlockHash>>,
     target: Mutex<Option<BlueScoredChainBlockHash>>,
     last_error_timestamp: AtomicU64,
+    resync_requested: AtomicBool,
 
     shutting_down: AtomicBool,
     analyzer: Analyzer,
@@ -74,11 +75,12 @@ impl Syncer {
             shutting_down: AtomicBool::new(false),
             analyzer,
             last_error_timestamp: AtomicU64::new(0),
+            resync_requested: AtomicBool::new(false),
         }
     }
 
     async fn sync_task(&self) {
-        let sink = loop {
+        let mut sink = loop {
             let Ok(sink) = self
                 .bridge
                 .get_sink()
@@ -127,9 +129,11 @@ impl Syncer {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     continue;
                 }
-                self.is_synced.store(true, Ordering::SeqCst);
-                *self.target.lock().unwrap() = None;
-                break;
+                if self.mark_synced_if_at_current_sink().await {
+                    break;
+                }
+                sink = self.current_sync_target_or(sink);
+                continue;
             }
 
             let Ok(GetVirtualChainFromBlockV2Response {
@@ -146,31 +150,30 @@ impl Syncer {
                 continue;
             };
 
+            let Some(last_known_block) = self
+                .last_added_chain_block(&added_chain_block_hashes)
+                .await
+                .inspect_err(|err| error!("Failed to resolve last added chain block: {:?}", err))
+                .ok()
+                .flatten()
+            else {
+                warn!("historical response did not include added chain blocks; retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            };
+
             let target_is_reached = {
                 let target = *self.target.lock().unwrap().get_or_insert_with(|| {
                     debug!("Setting target to sink {sink:?}");
                     sink
                 });
                 info!("Target: {:?}", target);
-                if chain_block_accepted_transactions.iter().any(|d| {
-                    d.chain_block_header.blue_score.unwrap_or_default() >= target.blue_score
-                }) {
+                if last_known_block.blue_score >= target.blue_score {
                     info!("added_chain_block_hashes contains target, target is reached");
                     true
                 } else {
                     false
                 }
-            };
-            let last_known_block = BlueScoredChainBlockHash {
-                blue_score: chain_block_accepted_transactions
-                    .last()
-                    .and_then(|v| v.chain_block_header.blue_score)
-                    .unwrap_or(from.blue_score),
-                block_hash: chain_block_accepted_transactions
-                    .last()
-                    .and_then(|v| v.chain_block_header.hash)
-                    .or_else(|| added_chain_block_hashes.last().copied())
-                    .unwrap_or(from.block_hash),
             };
 
             let mergesets = match reconstruct_and_process_acceptance_data(
@@ -224,12 +227,74 @@ impl Syncer {
             debug!("Last known block is updated to: {:?}", last_known_block);
 
             if target_is_reached {
-                info!("target is reached, state is synced");
-                self.is_synced.store(true, Ordering::SeqCst);
-                *self.target.lock().unwrap() = None;
-                break;
+                info!("target is reached");
+                if self.mark_synced_if_at_current_sink().await {
+                    break;
+                }
+                sink = self.current_sync_target_or(sink);
             }
         }
+    }
+
+    async fn last_added_chain_block(
+        &self,
+        added_chain_block_hashes: &[RpcHash],
+    ) -> Result<Option<BlueScoredChainBlockHash>> {
+        let Some(block_hash) = added_chain_block_hashes.last().copied() else {
+            return Ok(None);
+        };
+        let blue_score = self
+            .bridge
+            .get_block(block_hash, false)
+            .await?
+            .header
+            .blue_score;
+        Ok(Some(BlueScoredChainBlockHash {
+            blue_score,
+            block_hash,
+        }))
+    }
+
+    async fn mark_synced_if_at_current_sink(&self) -> bool {
+        let latest_sink =
+            match self.bridge.get_sink().await.inspect_err(|err| {
+                error!("Failed to refresh sink before marking synced: {:?}", err)
+            }) {
+                Ok(sink) => sink,
+                Err(_) => return false,
+            };
+
+        let last_known_block = self
+            .last_known_block
+            .lock()
+            .unwrap()
+            .expect("last known block is not set");
+        let resync_requested = self.resync_requested.swap(false, Ordering::SeqCst);
+
+        if last_known_block < latest_sink {
+            info!(
+                "node tip advanced during sync; continuing from {:?} to {:?}",
+                last_known_block, latest_sink
+            );
+            *self.target.lock().unwrap() = Some(latest_sink);
+            return false;
+        }
+
+        if resync_requested {
+            info!("resync was requested during historical sync; current sink already covered");
+        }
+
+        info!("state is synced");
+        self.is_synced.store(true, Ordering::SeqCst);
+        *self.target.lock().unwrap() = None;
+        true
+    }
+
+    fn current_sync_target_or(
+        &self,
+        fallback: BlueScoredChainBlockHash,
+    ) -> BlueScoredChainBlockHash {
+        self.target.lock().unwrap().unwrap_or(fallback)
     }
 
     fn spawn_sync_task_impl(self: &Arc<Self>) {
@@ -276,6 +341,8 @@ impl ConsumerT for Syncer {
                 .map_err(|_| Error::SendError)?;
             self.is_synced.store(false, Ordering::SeqCst);
             self.spawn_sync_task_impl();
+        } else {
+            self.resync_requested.store(true, Ordering::SeqCst);
         }
 
         Ok(())
@@ -526,9 +593,18 @@ impl ReconstructedChainBlockAcceptance {
         let mut merged_block_indexes = AHashMap::<RpcHash, usize>::new();
 
         for rpc_tx in &accepted.accepted_transactions {
-            let verbose_data = rpc_tx.verbose_data.as_ref();
-            let merged_block_hash = verbose_data.and_then(|v| v.block_hash).unwrap_or_default();
-            let block_time = verbose_data.and_then(|v| v.block_time).unwrap_or_default();
+            let Some(verbose_data) = rpc_tx.verbose_data.as_ref() else {
+                warn!("skipping accepted transaction without verbose data");
+                continue;
+            };
+            let Some(merged_block_hash) = verbose_data.block_hash else {
+                warn!("skipping accepted transaction without verbose block hash");
+                continue;
+            };
+            let Some(block_time) = verbose_data.block_time else {
+                warn!("skipping accepted transaction without verbose block time");
+                continue;
+            };
             let index = *merged_block_indexes
                 .entry(merged_block_hash)
                 .or_insert_with(|| {
@@ -561,6 +637,7 @@ struct ReconstructedMergedBlockAcceptance {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kaspa_rpc_core::{RpcOptionalHeader, RpcOptionalTransactionVerboseData};
 
     fn entropy(hashes: &[RpcHash]) -> u64 {
         let mut builder = MergesetEntropyBuilder::default();
@@ -568,6 +645,22 @@ mod tests {
             builder.add_block_hash(hash);
         }
         builder.finalize()
+    }
+
+    fn optional_transaction(
+        verbose_data: Option<RpcOptionalTransactionVerboseData>,
+    ) -> RpcOptionalTransaction {
+        RpcOptionalTransaction {
+            version: None,
+            inputs: vec![],
+            outputs: vec![],
+            lock_time: None,
+            subnetwork_id: None,
+            gas: None,
+            payload: None,
+            mass: None,
+            verbose_data,
+        }
     }
 
     #[test]
@@ -605,6 +698,55 @@ mod tests {
             entropy(&[selected_parent, empty_merged])
         );
         assert_ne!(mergesets[0].entropy, entropy(&[selected_parent]));
+    }
+
+    #[test]
+    fn flat_reconstruction_skips_transactions_missing_verbose_block_fields() {
+        let accepted_chain = RpcHash::from_le_u64([0x31, 0x32, 0x33, 0x34]);
+        let merged_block = RpcHash::from_le_u64([0x41, 0x42, 0x43, 0x44]);
+        let accepted = RpcChainBlockAcceptedTransactions {
+            chain_block_header: RpcOptionalHeader {
+                hash: Some(accepted_chain),
+                blue_score: Some(42),
+                daa_score: Some(24),
+                ..RpcOptionalHeader::default()
+            },
+            accepted_transactions: vec![
+                optional_transaction(None),
+                optional_transaction(Some(RpcOptionalTransactionVerboseData {
+                    transaction_id: None,
+                    hash: None,
+                    compute_mass: None,
+                    block_hash: None,
+                    block_time: Some(100),
+                })),
+                optional_transaction(Some(RpcOptionalTransactionVerboseData {
+                    transaction_id: None,
+                    hash: None,
+                    compute_mass: None,
+                    block_hash: Some(merged_block),
+                    block_time: None,
+                })),
+                optional_transaction(Some(RpcOptionalTransactionVerboseData {
+                    transaction_id: None,
+                    hash: None,
+                    compute_mass: None,
+                    block_hash: Some(merged_block),
+                    block_time: Some(100),
+                })),
+            ],
+        };
+
+        let reconstructed =
+            ReconstructedChainBlockAcceptance::from_flat_accepted_transactions(&accepted);
+
+        assert_eq!(reconstructed.accepted_chain_block_hash, accepted_chain);
+        assert_eq!(reconstructed.accepting_block_blue_score, 42);
+        assert_eq!(reconstructed.accepting_block_daa_score, 24);
+        assert_eq!(reconstructed.merged_blocks.len(), 1);
+        assert_eq!(reconstructed.merged_blocks[0].hash, merged_block);
+        assert_eq!(reconstructed.merged_blocks[0].timestamp, 100);
+        assert_eq!(reconstructed.merged_blocks[0].transactions.len(), 1);
     }
 }
 
