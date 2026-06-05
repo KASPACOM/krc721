@@ -19,6 +19,8 @@ use kaspa_wrpc_client::prelude::{ConnectOptions, KaspaRpcClient};
 use krc721_core::model::krc721::{BlueScoredChainBlockHash, DataT};
 use tracing::{error, info, info_span, Instrument};
 
+const MINIMUM_KASPAD_VERSION: &str = "1.3.0-toc.5";
+
 pub enum NexusMode {
     Indexer { processor: Arc<Processor> },
     Capture { database_name: String },
@@ -171,6 +173,13 @@ impl Nexus {
                 .collect::<Vec<_>>()
                 .join(".");
             return Err(Error::RpcApiVersion(current, connected));
+        }
+
+        if self.inner.syncer.is_some() && !is_supported_kaspad_version(&server_version) {
+            return Err(Error::UnsupportedKaspadVersion {
+                minimum: MINIMUM_KASPAD_VERSION,
+                connected: server_version,
+            });
         }
 
         self.state().set_current_daa_score(virtual_daa_score);
@@ -635,6 +644,89 @@ impl Nexus {
         let response = self.accessor().krc721_reserved_tokens().await?;
         let response = GetReservedTokensResponse { response };
         Ok(response)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct KaspadVersion {
+    major: u64,
+    minor: u64,
+    patch: u64,
+    toc: Option<u64>,
+}
+
+fn is_supported_kaspad_version(version: &str) -> bool {
+    let Some(version) = parse_kaspad_version(version) else {
+        return false;
+    };
+    let minimum = parse_kaspad_version(MINIMUM_KASPAD_VERSION).expect("minimum version is valid");
+
+    match (version.major, version.minor, version.patch).cmp(&(
+        minimum.major,
+        minimum.minor,
+        minimum.patch,
+    )) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match (version.toc, minimum.toc) {
+            (None, Some(_)) => true,
+            (Some(version_toc), Some(minimum_toc)) => version_toc >= minimum_toc,
+            (Some(_), None) => false,
+            (None, None) => true,
+        },
+    }
+}
+
+fn parse_kaspad_version(version: &str) -> Option<KaspadVersion> {
+    let version = version
+        .trim()
+        .strip_prefix("kaspad")
+        .unwrap_or(version)
+        .trim()
+        .strip_prefix('v')
+        .unwrap_or(version.trim());
+    let mut parts = version.split('-');
+    let core = parts.next()?;
+    let mut core_parts = core.split('.');
+    let major = core_parts.next()?.parse().ok()?;
+    let minor = core_parts.next()?.parse().ok()?;
+    let patch = core_parts.next()?.parse().ok()?;
+    if core_parts.next().is_some() {
+        return None;
+    }
+
+    let toc = parts.find_map(|part| part.strip_prefix("toc.")?.parse().ok());
+
+    Some(KaspadVersion {
+        major,
+        minor,
+        patch,
+        toc,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_kaspad_versions_before_toc_5() {
+        assert!(!is_supported_kaspad_version("1.2.1-toc.3"));
+        assert!(!is_supported_kaspad_version("v1.3.0-toc.4"));
+    }
+
+    #[test]
+    fn accepts_minimum_toc_5_and_newer_versions() {
+        assert!(is_supported_kaspad_version("1.3.0-toc.5"));
+        assert!(is_supported_kaspad_version("kaspad v1.3.0-toc.5-04b0d135"));
+        assert!(is_supported_kaspad_version("1.3.0"));
+        assert!(is_supported_kaspad_version("1.3.1-toc.1"));
+    }
+
+    #[test]
+    fn rejects_unparseable_kaspad_versions() {
+        assert!(!is_supported_kaspad_version("unknown"));
+        assert!(!is_supported_kaspad_version("1.3"));
     }
 }
 

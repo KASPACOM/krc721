@@ -150,6 +150,15 @@ impl Syncer {
                 continue;
             };
 
+            if let Err(err) = validate_historical_acceptance_coverage(
+                &added_chain_block_hashes,
+                &chain_block_accepted_transactions,
+            ) {
+                error!("Historical acceptance data is incomplete: {:?}", err);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+
             let Some(last_known_block) = self
                 .last_added_chain_block(&added_chain_block_hashes)
                 .await
@@ -390,6 +399,38 @@ async fn reconstruct_and_process_acceptance_data(
     ))
 }
 
+fn validate_historical_acceptance_coverage(
+    added_chain_block_hashes: &[RpcHash],
+    chain_block_accepted_transactions: &[RpcChainBlockAcceptedTransactions],
+) -> Result<()> {
+    if added_chain_block_hashes.len() != chain_block_accepted_transactions.len() {
+        return Err(Error::custom(format!(
+            "added chain block count {} does not match acceptance record count {}",
+            added_chain_block_hashes.len(),
+            chain_block_accepted_transactions.len()
+        )));
+    }
+
+    for (index, (expected_hash, accepted)) in added_chain_block_hashes
+        .iter()
+        .zip(chain_block_accepted_transactions.iter())
+        .enumerate()
+    {
+        let Some(actual_hash) = accepted.chain_block_header.hash else {
+            return Err(Error::custom(format!(
+                "missing accepted chain block hash at index {index}"
+            )));
+        };
+        if actual_hash != *expected_hash {
+            return Err(Error::custom(format!(
+                "acceptance record hash mismatch at index {index}: expected {expected_hash}, got {actual_hash}"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 async fn reconstruct_chain_block_acceptance(
     bridge: &Arc<dyn BridgeT>,
     block_cache: &mut AHashMap<RpcHash, RpcBlock>,
@@ -456,19 +497,19 @@ async fn reconstruct_chain_block_acceptance(
 
     for rpc_tx in &accepted.accepted_transactions {
         let Some(verbose_data) = rpc_tx.verbose_data.as_ref() else {
-            warn!("skipping accepted transaction without verbose data");
-            continue;
+            return Err(Error::custom(format!(
+                "accepted transaction in chain block {accepted_chain_block_hash} is missing verbose data"
+            )));
         };
         let Some(block_hash) = verbose_data.block_hash else {
-            warn!("skipping accepted transaction without verbose block hash");
-            continue;
+            return Err(Error::custom(format!(
+                "accepted transaction in chain block {accepted_chain_block_hash} is missing verbose block hash"
+            )));
         };
         let Some(index) = block_indexes.get(&block_hash).copied() else {
-            warn!(
-                "skipping accepted transaction from block {} not found in reconstructed mergeset for {}",
-                block_hash, accepted_chain_block_hash
-            );
-            continue;
+            return Err(Error::custom(format!(
+                "accepted transaction from block {block_hash} was not found in reconstructed mergeset for {accepted_chain_block_hash}"
+            )));
         };
         merged_blocks[index].transactions.push(rpc_tx.clone());
     }
@@ -661,6 +702,67 @@ mod tests {
             mass: None,
             verbose_data,
         }
+    }
+
+    fn acceptance_header(hash: Option<RpcHash>) -> RpcChainBlockAcceptedTransactions {
+        RpcChainBlockAcceptedTransactions {
+            chain_block_header: RpcOptionalHeader {
+                hash,
+                blue_score: Some(42),
+                daa_score: Some(24),
+                ..RpcOptionalHeader::default()
+            },
+            accepted_transactions: vec![],
+        }
+    }
+
+    #[test]
+    fn historical_acceptance_coverage_requires_one_record_per_added_block() {
+        let first = RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]);
+        let second = RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]);
+
+        let err = validate_historical_acceptance_coverage(
+            &[first, second],
+            &[acceptance_header(Some(first))],
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn historical_acceptance_coverage_rejects_missing_or_wrong_hashes() {
+        let expected = RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]);
+        let unexpected = RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]);
+
+        let missing_err =
+            validate_historical_acceptance_coverage(&[expected], &[acceptance_header(None)])
+                .unwrap_err();
+        assert!(missing_err
+            .to_string()
+            .contains("missing accepted chain block hash"));
+
+        let mismatch_err = validate_historical_acceptance_coverage(
+            &[expected],
+            &[acceptance_header(Some(unexpected))],
+        )
+        .unwrap_err();
+        assert!(mismatch_err.to_string().contains("hash mismatch"));
+    }
+
+    #[test]
+    fn historical_acceptance_coverage_accepts_matching_ordered_records() {
+        let first = RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]);
+        let second = RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]);
+
+        validate_historical_acceptance_coverage(
+            &[first, second],
+            &[
+                acceptance_header(Some(first)),
+                acceptance_header(Some(second)),
+            ],
+        )
+        .unwrap();
     }
 
     #[test]
