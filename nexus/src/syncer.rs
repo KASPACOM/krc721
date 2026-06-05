@@ -19,6 +19,7 @@ use krc721_core::model::krc721::Tick;
 pub type ReservedTokenMap = AHashMap<Tick, ScriptPublicKey>;
 
 const SYNC_ERROR_THRESHOLD_SECONDS: u64 = 15;
+const ORIGIN_HASH_BYTE: u8 = 0xfe;
 
 pub struct Syncer {
     // This will be used for performance / realtime metrics / counters
@@ -461,11 +462,17 @@ async fn reconstruct_chain_block_acceptance(
     let mut merged_blocks = Vec::with_capacity(
         1 + verbose_data.merge_set_blues_hashes.len() + verbose_data.merge_set_reds_hashes.len(),
     );
-    let selected_parent =
-        get_cached_block(bridge, block_cache, selected_parent_hash, false).await?;
+    let selected_parent_timestamp = if is_origin_hash(&selected_parent_hash) {
+        0
+    } else {
+        get_cached_block(bridge, block_cache, selected_parent_hash, false)
+            .await?
+            .header
+            .timestamp
+    };
     merged_blocks.push(ReconstructedMergedBlockAcceptance {
         hash: selected_parent_hash,
-        timestamp: selected_parent.header.timestamp,
+        timestamp: selected_parent_timestamp,
         transactions: Vec::new(),
     });
 
@@ -477,6 +484,10 @@ async fn reconstruct_chain_block_acceptance(
         .filter(|hash| *hash != selected_parent_hash)
         .chain(verbose_data.merge_set_reds_hashes.iter().copied())
     {
+        if is_origin_hash(&hash) {
+            sortable.push((hash, Default::default(), 0));
+            continue;
+        }
         let block = get_cached_block(bridge, block_cache, hash, false).await?;
         sortable.push((hash, block.header.blue_work, block.header.timestamp));
     }
@@ -535,6 +546,10 @@ async fn get_cached_block(
     let block = bridge.get_block(hash, include_transactions).await?;
     block_cache.insert(hash, block.clone());
     Ok(block)
+}
+
+fn is_origin_hash(hash: &RpcHash) -> bool {
+    hash.as_bytes().iter().all(|byte| *byte == ORIGIN_HASH_BYTE)
 }
 
 fn process_reconstructed_acceptance_data(
@@ -763,6 +778,15 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn detects_kaspa_origin_hash() {
+        let origin = RpcHash::from_bytes([ORIGIN_HASH_BYTE; 32]);
+        let non_origin = RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]);
+
+        assert!(is_origin_hash(&origin));
+        assert!(!is_origin_hash(&non_origin));
     }
 
     #[test]
