@@ -40,6 +40,12 @@ pub enum Error {
     #[error("Node is not synced")]
     NodeNotSynced,
 
+    #[error("Unsupported kaspad version - needs at least {minimum}, connected to: {connected}")]
+    UnsupportedKaspadVersion {
+        minimum: &'static str,
+        connected: String,
+    },
+
     #[error(transparent)]
     Rpc(#[from] kaspa_rpc_core::RpcError),
 
