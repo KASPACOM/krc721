@@ -476,6 +476,8 @@ async fn reconstruct_chain_block_acceptance(
         transactions: Vec::new(),
     });
 
+    let mut known_merged_blocks = AHashMap::<RpcHash, ()>::new();
+    known_merged_blocks.insert(selected_parent_hash, ());
     let mut sortable = Vec::new();
     for hash in verbose_data
         .merge_set_blues_hashes
@@ -484,12 +486,41 @@ async fn reconstruct_chain_block_acceptance(
         .filter(|hash| *hash != selected_parent_hash)
         .chain(verbose_data.merge_set_reds_hashes.iter().copied())
     {
+        if known_merged_blocks.insert(hash, ()).is_some() {
+            continue;
+        }
         if is_origin_hash(&hash) {
             sortable.push((hash, Default::default(), 0));
             continue;
         }
         let block = get_cached_block(bridge, block_cache, hash, false).await?;
         sortable.push((hash, block.header.blue_work, block.header.timestamp));
+    }
+
+    for rpc_tx in &accepted.accepted_transactions {
+        let Some(verbose_data) = rpc_tx.verbose_data.as_ref() else {
+            return Err(Error::custom(format!(
+                "accepted transaction in chain block {accepted_chain_block_hash} is missing verbose data"
+            )));
+        };
+        let Some(block_hash) = verbose_data.block_hash else {
+            return Err(Error::custom(format!(
+                "accepted transaction in chain block {accepted_chain_block_hash} is missing verbose block hash"
+            )));
+        };
+        if known_merged_blocks.insert(block_hash, ()).is_some() {
+            continue;
+        }
+        warn!(
+            "accepted transaction references block {} not listed in reconstructed mergeset for {}; adding it from transaction verbose data",
+            block_hash, accepted_chain_block_hash
+        );
+        if is_origin_hash(&block_hash) {
+            sortable.push((block_hash, Default::default(), 0));
+            continue;
+        }
+        let block = get_cached_block(bridge, block_cache, block_hash, false).await?;
+        sortable.push((block_hash, block.header.blue_work, block.header.timestamp));
     }
     sortable.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
 
