@@ -39,7 +39,10 @@ pub enum RTNotification {
 }
 
 pub enum HTNotification {
-    HistoricalVirtualChainChangesNotification(VirtualChainChanges),
+    HistoricalVirtualChainChangesNotification(
+        VirtualChainChanges,
+        Option<crossbeam_channel::Sender<std::result::Result<(), String>>>,
+    ),
     ApplicationHistoricalVirtualChainChangesNotification(
         VirtualChainChanges,
         crossbeam_channel::Sender<std::result::Result<(), String>>,
@@ -116,7 +119,25 @@ impl Processor {
         self.historical_sender
             .send(HTNotification::HistoricalVirtualChainChangesNotification(
                 notification,
+                None,
             ))
+    }
+
+    pub fn send_historical_virtual_chain_changed_notification_and_wait(
+        &self,
+        notification: VirtualChainChanges,
+    ) -> Result<()> {
+        let (sender, receiver) = crossbeam_channel::bounded(0);
+        self.historical_sender
+            .send(HTNotification::HistoricalVirtualChainChangesNotification(
+                notification,
+                Some(sender),
+            ))
+            .map_err(|_| Error::SendError)?;
+        receiver
+            .recv()
+            .map_err(|_| Error::SendError)?
+            .map_err(Error::HistoricalApplication)
     }
 
     pub fn send_historical_virtual_chain_changed_notification_and_apply_queue(
@@ -171,10 +192,27 @@ impl Processor {
             );
             {
                 match ingest_event.inspect_err(|err| error!("error receiving message: {err}"))? {
-                    HTNotification::HistoricalVirtualChainChangesNotification(vcc) => {
+                    HTNotification::HistoricalVirtualChainChangesNotification(
+                        vcc,
+                        completion_sender,
+                    ) => {
                         debug!("historical virtual chain changes notification received");
 
-                        self.process_chain_changes(vcc)?
+                        let processing_result = self.process_chain_changes(vcc);
+                        if let Some(completion_sender) = completion_sender {
+                            let completion_result = processing_result
+                                .as_ref()
+                                .map(|_| ())
+                                .map_err(|err| err.to_string());
+                            _ = completion_sender
+                                .send(completion_result)
+                                .inspect_err(|err| {
+                                    error!(
+                                        "failed to send response after historical processing: {err}"
+                                    )
+                                });
+                        }
+                        processing_result?
                     }
                     HTNotification::ApplicationHistoricalVirtualChainChangesNotification(
                         vcc,
