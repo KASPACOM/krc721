@@ -10,4 +10,6 @@ pub enum Error {
     Db(#[from] krc721_database::error::Error),
     #[error("Unexpected data from source")]
     UnexpectedKaspaNodeBehaviour,
+    #[error("Historical application failed: {0}")]
+    HistoricalApplication(String),
 }
