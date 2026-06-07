@@ -381,9 +381,7 @@ fn historical_response_reaches_target(
     added_chain_block_hashes: &[RpcHash],
     target: BlueScoredChainBlockHash,
 ) -> bool {
-    added_chain_block_hashes
-        .iter()
-        .any(|hash| *hash == target.block_hash)
+    added_chain_block_hashes.contains(&target.block_hash)
 }
 
 impl ConsumerT for Syncer {
