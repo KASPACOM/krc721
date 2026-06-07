@@ -188,20 +188,13 @@ impl Syncer {
                 continue;
             }
 
-            let target_is_reached = {
+            let target_progress = {
                 let target = *self.target.lock().unwrap().get_or_insert_with(|| {
                     debug!("Setting target to sink {sink:?}");
                     sink
                 });
                 info!("Target: {:?}", target);
-                if historical_response_reaches_target(&added_chain_block_hashes, target)
-                    || (last_added_chain_block.is_none() && is_same_sync_point(sink, target))
-                {
-                    info!("added_chain_block_hashes contains target, target is reached");
-                    true
-                } else {
-                    false
-                }
+                classify_target_progress(&added_chain_block_hashes, last_added_chain_block, target)
             };
 
             let mergesets = match reconstruct_and_process_acceptance_data(
@@ -225,7 +218,7 @@ impl Syncer {
                 mergesets,
             };
 
-            if target_is_reached {
+            if target_progress == TargetProgress::Reached {
                 if let Err(err) = self
                     .processor
                     .send_historical_virtual_chain_changed_notification_and_apply_queue(
@@ -251,7 +244,14 @@ impl Syncer {
                 debug!(target: "last_known_block_tracking", "Last known block is updated to: {:?}", next_last_known_block);
             }
 
-            if target_is_reached {
+            if target_progress == TargetProgress::Obsolete {
+                info!("target was bypassed by historical replay; refreshing sync target");
+                sink = self.refresh_sync_target_or(sink).await;
+                *self.target.lock().unwrap() = Some(sink);
+                continue;
+            }
+
+            if target_progress == TargetProgress::Reached {
                 info!("target is reached");
                 if self.mark_synced_if_at_current_sink().await {
                     break;
@@ -322,6 +322,17 @@ impl Syncer {
         self.target.lock().unwrap().unwrap_or(fallback)
     }
 
+    async fn refresh_sync_target_or(
+        &self,
+        fallback: BlueScoredChainBlockHash,
+    ) -> BlueScoredChainBlockHash {
+        self.bridge
+            .get_sink()
+            .await
+            .inspect_err(|err| error!("Failed to refresh sync target: {:?}", err))
+            .unwrap_or(fallback)
+    }
+
     fn spawn_sync_task_impl(self: &Arc<Self>) {
         // this should be implemented as a Service, since it is not
         // there are sequencing issues, and we need to ensure that
@@ -377,11 +388,29 @@ fn is_same_sync_point(from: BlueScoredChainBlockHash, sink: BlueScoredChainBlock
     from == sink
 }
 
-fn historical_response_reaches_target(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TargetProgress {
+    Pending,
+    Reached,
+    Obsolete,
+}
+
+fn classify_target_progress(
     added_chain_block_hashes: &[RpcHash],
+    last_added_chain_block: Option<BlueScoredChainBlockHash>,
     target: BlueScoredChainBlockHash,
-) -> bool {
-    added_chain_block_hashes.contains(&target.block_hash)
+) -> TargetProgress {
+    if added_chain_block_hashes.contains(&target.block_hash) {
+        return TargetProgress::Reached;
+    }
+
+    match last_added_chain_block {
+        Some(last_added_chain_block) if last_added_chain_block.blue_score >= target.blue_score => {
+            TargetProgress::Obsolete
+        }
+        None => TargetProgress::Reached,
+        _ => TargetProgress::Pending,
+    }
 }
 
 impl ConsumerT for Syncer {
@@ -896,22 +925,66 @@ mod tests {
     }
 
     #[test]
-    fn historical_response_reaches_target_by_hash_not_score() {
+    fn classifies_target_progress_by_hash_and_replay_tip() {
         let target = BlueScoredChainBlockHash {
             blue_score: 100,
             block_hash: RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]),
         };
-        let same_score_different_hash = RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]);
-        let later_block = RpcHash::from_le_u64([0x31, 0x32, 0x33, 0x34]);
+        let below = BlueScoredChainBlockHash {
+            blue_score: 99,
+            block_hash: RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]),
+        };
+        let same_score_different_hash = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x31, 0x32, 0x33, 0x34]),
+        };
+        let later = BlueScoredChainBlockHash {
+            blue_score: 101,
+            block_hash: RpcHash::from_le_u64([0x41, 0x42, 0x43, 0x44]),
+        };
 
-        assert!(!historical_response_reaches_target(
-            &[same_score_different_hash, later_block],
-            target
-        ));
-        assert!(historical_response_reaches_target(
-            &[same_score_different_hash, target.block_hash, later_block],
-            target
-        ));
+        assert_eq!(
+            classify_target_progress(&[], None, target),
+            TargetProgress::Reached
+        );
+        assert_eq!(
+            classify_target_progress(&[target.block_hash], Some(later), target),
+            TargetProgress::Reached
+        );
+        assert_eq!(
+            classify_target_progress(&[below.block_hash], Some(below), target),
+            TargetProgress::Pending
+        );
+        assert_eq!(
+            classify_target_progress(
+                &[same_score_different_hash.block_hash],
+                Some(same_score_different_hash),
+                target
+            ),
+            TargetProgress::Obsolete
+        );
+        assert_eq!(
+            classify_target_progress(&[later.block_hash], Some(later), target),
+            TargetProgress::Obsolete
+        );
+
+        let prod2_stale_target = BlueScoredChainBlockHash {
+            blue_score: 452_346_424,
+            block_hash: RpcHash::from_le_u64([0x51, 0x52, 0x53, 0x54]),
+        };
+        let prod2_replay_tip = BlueScoredChainBlockHash {
+            blue_score: 452_348_469,
+            block_hash: RpcHash::from_le_u64([0x61, 0x62, 0x63, 0x64]),
+        };
+
+        assert_eq!(
+            classify_target_progress(
+                &[prod2_replay_tip.block_hash],
+                Some(prod2_replay_tip),
+                prod2_stale_target
+            ),
+            TargetProgress::Obsolete
+        );
     }
 
     #[test]
