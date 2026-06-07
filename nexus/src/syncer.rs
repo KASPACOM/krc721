@@ -126,7 +126,6 @@ impl Syncer {
                     .send_historical_virtual_chain_changed_notification_and_apply_queue(
                         notification,
                     )
-                    .map_err(|_| Error::SendError)
                 {
                     error!("Failed to apply queued notification after sync: {:?}", err);
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -147,7 +146,7 @@ impl Syncer {
             }
 
             let Ok(GetVirtualChainFromBlockV2Response {
-                removed_chain_block_hashes,
+                mut removed_chain_block_hashes,
                 added_chain_block_hashes,
                 chain_block_accepted_transactions,
             }) = self
@@ -159,6 +158,19 @@ impl Syncer {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 continue;
             };
+
+            if from.blue_score >= sink.blue_score
+                && from.block_hash != sink.block_hash
+                && !removed_chain_block_hashes.contains(&from.block_hash)
+            {
+                warn!(
+                    "historical response did not remove stale sync point {}; forcing rollback from score {}",
+                    from.block_hash, from.blue_score
+                );
+                let mut removed = (*removed_chain_block_hashes).clone();
+                removed.push(from.block_hash);
+                removed_chain_block_hashes = Arc::new(removed);
+            }
 
             if let Err(err) = validate_historical_acceptance_coverage(
                 &added_chain_block_hashes,
@@ -224,7 +236,6 @@ impl Syncer {
                     .send_historical_virtual_chain_changed_notification_and_apply_queue(
                         notification,
                     )
-                    .map_err(|_| Error::SendError)
                 {
                     error!("Failed to send historical notification: {:?}", err);
                     continue;

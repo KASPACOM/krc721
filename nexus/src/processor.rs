@@ -40,7 +40,10 @@ pub enum RTNotification {
 
 pub enum HTNotification {
     HistoricalVirtualChainChangesNotification(VirtualChainChanges),
-    ApplicationHistoricalVirtualChainChangesNotification(VirtualChainChanges),
+    ApplicationHistoricalVirtualChainChangesNotification(
+        VirtualChainChanges,
+        crossbeam_channel::Sender<std::result::Result<(), String>>,
+    ),
 }
 
 type RealTimeThreadHandle = thread::JoinHandle<()>;
@@ -119,10 +122,20 @@ impl Processor {
     pub fn send_historical_virtual_chain_changed_notification_and_apply_queue(
         &self,
         notification: VirtualChainChanges,
-    ) -> Result<(), SendError<HTNotification>> {
-        self.historical_sender.send(
-            HTNotification::ApplicationHistoricalVirtualChainChangesNotification(notification),
-        )
+    ) -> Result<()> {
+        let (sender, receiver) = crossbeam_channel::bounded(0);
+        self.historical_sender
+            .send(
+                HTNotification::ApplicationHistoricalVirtualChainChangesNotification(
+                    notification,
+                    sender,
+                ),
+            )
+            .map_err(|_| Error::SendError)?;
+        receiver
+            .recv()
+            .map_err(|_| Error::SendError)?
+            .map_err(Error::HistoricalApplication)
     }
 
     pub fn switch_to_queue_mod(&self) -> Result<(), SendError<RTNotification>> {
@@ -163,19 +176,36 @@ impl Processor {
 
                         self.process_chain_changes(vcc)?
                     }
-                    HTNotification::ApplicationHistoricalVirtualChainChangesNotification(vcc) => {
+                    HTNotification::ApplicationHistoricalVirtualChainChangesNotification(
+                        vcc,
+                        completion_sender,
+                    ) => {
                         debug!(
                             "application historical virtual chain changes notification received"
                         );
-                        self.process_chain_changes(vcc)?;
+                        let processing_result = self.process_chain_changes(vcc);
                         let (sender, receiver) = crossbeam_channel::bounded(0);
-                        debug!("applying queue, processing changes is done");
-                        self.realtime_sender
-                            .send(RTNotification::ApplyQueue(sender))
-                            .map_err(|_| Error::SendError)?;
-                        _ = receiver.recv().inspect_err(|err| {
-                            error!("application queue didn't response, err: {err}")
-                        });
+                        if processing_result.is_ok() {
+                            debug!("applying queue, processing changes is done");
+                            self.realtime_sender
+                                .send(RTNotification::ApplyQueue(sender))
+                                .map_err(|_| Error::SendError)?;
+                            _ = receiver.recv().inspect_err(|err| {
+                                error!("application queue didn't response, err: {err}")
+                            });
+                        }
+                        let completion_result = processing_result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(|err| err.to_string());
+                        _ = completion_sender
+                            .send(completion_result)
+                            .inspect_err(|err| {
+                                error!(
+                                    "failed to send response after historical application: {err}"
+                                )
+                            });
+                        processing_result?;
                         wait_for_switch = true;
                     }
                 }
