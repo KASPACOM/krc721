@@ -115,8 +115,8 @@ impl Syncer {
                 .expect("last known block is not set");
             info!("Syncing from block: {:?}", from);
 
-            if from >= sink {
-                info!("last known block is at or beyond sync target, state is synced");
+            if is_same_sync_point(from, sink) {
+                info!("last known block matches sync target, state is synced");
                 let notification = VirtualChainChanges {
                     removed_chain_block_hashes: Arc::new(vec![]),
                     mergesets: vec![],
@@ -137,6 +137,13 @@ impl Syncer {
                 }
                 sink = self.current_sync_target_or(sink);
                 continue;
+            }
+
+            if from.blue_score >= sink.blue_score {
+                warn!(
+                    "last known block score is at or beyond sink but hash differs; replaying from {:?} to handle reorg against {:?}",
+                    from, sink
+                );
             }
 
             let Ok(GetVirtualChainFromBlockV2Response {
@@ -162,17 +169,24 @@ impl Syncer {
                 continue;
             }
 
-            let Some(last_known_block) = self
+            let last_added_chain_block = self
                 .last_added_chain_block(&added_chain_block_hashes)
                 .await
                 .inspect_err(|err| error!("Failed to resolve last added chain block: {:?}", err))
                 .ok()
-                .flatten()
-            else {
-                warn!("historical response did not include added chain blocks; retrying");
+                .flatten();
+
+            if last_added_chain_block.is_none()
+                && removed_chain_block_hashes.is_empty()
+                && !is_same_sync_point(from, sink)
+            {
+                warn!(
+                    "historical response did not include chain changes from {:?} toward {:?}; retrying",
+                    from, sink
+                );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 continue;
-            };
+            }
 
             let target_is_reached = {
                 let target = *self.target.lock().unwrap().get_or_insert_with(|| {
@@ -180,7 +194,9 @@ impl Syncer {
                     sink
                 });
                 info!("Target: {:?}", target);
-                if last_known_block.blue_score >= target.blue_score {
+                if historical_response_reaches_target(&added_chain_block_hashes, target)
+                    || (last_added_chain_block.is_none() && is_same_sync_point(sink, target))
+                {
                     info!("added_chain_block_hashes contains target, target is reached");
                     true
                 } else {
@@ -229,14 +245,11 @@ impl Syncer {
                 continue;
             }
 
+            let next_last_known_block = last_added_chain_block.unwrap_or(sink);
             if let Some(v) = self.last_known_block.lock().unwrap().as_mut() {
-                if last_known_block > *v {
-                    *v = last_known_block;
-                    debug!(target: "last_known_block_tracking", "Last known block is updated to: {:?}", last_known_block);
-                }
+                *v = next_last_known_block;
+                debug!(target: "last_known_block_tracking", "Last known block is updated to: {:?}", next_last_known_block);
             }
-
-            debug!("Last known block is updated to: {:?}", last_known_block);
 
             if target_is_reached {
                 info!("target is reached");
@@ -283,9 +296,9 @@ impl Syncer {
             .expect("last known block is not set");
         let resync_requested = self.resync_requested.swap(false, Ordering::SeqCst);
 
-        if last_known_block < latest_sink {
+        if !is_same_sync_point(last_known_block, latest_sink) {
             info!(
-                "node tip advanced during sync; continuing from {:?} to {:?}",
+                "sync target changed during sync; continuing from {:?} to {:?}",
                 last_known_block, latest_sink
             );
             *self.target.lock().unwrap() = Some(latest_sink);
@@ -358,6 +371,19 @@ fn try_claim_sync_task_flag(sync_task_running: &AtomicBool) -> bool {
     sync_task_running
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
+}
+
+fn is_same_sync_point(from: BlueScoredChainBlockHash, sink: BlueScoredChainBlockHash) -> bool {
+    from == sink
+}
+
+fn historical_response_reaches_target(
+    added_chain_block_hashes: &[RpcHash],
+    target: BlueScoredChainBlockHash,
+) -> bool {
+    added_chain_block_hashes
+        .iter()
+        .any(|hash| *hash == target.block_hash)
 }
 
 impl ConsumerT for Syncer {
@@ -848,6 +874,46 @@ mod tests {
 
         running.store(false, Ordering::SeqCst);
         assert!(try_claim_sync_task_flag(&running));
+    }
+
+    #[test]
+    fn sync_point_requires_same_block_hash_not_just_score_ordering() {
+        let old_tip = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]),
+        };
+        let new_sink_same_score = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]),
+        };
+        let new_sink_lower_score = BlueScoredChainBlockHash {
+            blue_score: 99,
+            block_hash: RpcHash::from_le_u64([0x31, 0x32, 0x33, 0x34]),
+        };
+
+        assert!(old_tip >= new_sink_lower_score);
+        assert!(!is_same_sync_point(old_tip, new_sink_same_score));
+        assert!(!is_same_sync_point(old_tip, new_sink_lower_score));
+        assert!(is_same_sync_point(old_tip, old_tip));
+    }
+
+    #[test]
+    fn historical_response_reaches_target_by_hash_not_score() {
+        let target = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]),
+        };
+        let same_score_different_hash = RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]);
+        let later_block = RpcHash::from_le_u64([0x31, 0x32, 0x33, 0x34]);
+
+        assert!(!historical_response_reaches_target(
+            &[same_score_different_hash, later_block],
+            target
+        ));
+        assert!(historical_response_reaches_target(
+            &[same_score_different_hash, target.block_hash, later_block],
+            target
+        ));
     }
 
     #[test]
