@@ -117,20 +117,6 @@ impl Syncer {
 
             if is_same_sync_point(from, sink) {
                 info!("last known block matches sync target, state is synced");
-                let notification = VirtualChainChanges {
-                    removed_chain_block_hashes: Arc::new(vec![]),
-                    mergesets: vec![],
-                };
-                if let Err(err) = self
-                    .processor
-                    .send_historical_virtual_chain_changed_notification_and_apply_queue(
-                        notification,
-                    )
-                {
-                    error!("Failed to apply queued notification after sync: {:?}", err);
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    continue;
-                }
                 if self.mark_synced_if_at_current_sink().await {
                     break;
                 }
@@ -233,17 +219,14 @@ impl Syncer {
             if target_progress == TargetProgress::Reached {
                 if let Err(err) = self
                     .processor
-                    .send_historical_virtual_chain_changed_notification_and_apply_queue(
-                        notification,
-                    )
+                    .send_historical_virtual_chain_changed_notification_and_wait(notification)
                 {
                     error!("Failed to send historical notification: {:?}", err);
                     continue;
                 }
             } else if let Err(err) = self
                 .processor
-                .send_historical_virtual_chain_changed_notification(notification)
-                .map_err(|_| Error::SendError)
+                .send_historical_virtual_chain_changed_notification_and_wait(notification)
             {
                 error!("Failed to send historical notification: {:?}", err);
                 continue;
@@ -318,6 +301,18 @@ impl Syncer {
 
         if resync_requested {
             info!("resync was requested during historical sync; current sink already covered");
+        }
+
+        let notification = VirtualChainChanges {
+            removed_chain_block_hashes: Arc::new(vec![]),
+            mergesets: vec![],
+        };
+        if let Err(err) = self
+            .processor
+            .send_historical_virtual_chain_changed_notification_and_apply_queue(notification)
+        {
+            error!("Failed to apply queued notification after sync: {:?}", err);
+            return false;
         }
 
         info!("state is synced");
