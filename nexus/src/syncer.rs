@@ -35,6 +35,7 @@ pub struct Syncer {
     target: Mutex<Option<BlueScoredChainBlockHash>>,
     last_error_timestamp: AtomicU64,
     resync_requested: AtomicBool,
+    sync_task_running: AtomicBool,
 
     shutting_down: AtomicBool,
     analyzer: Analyzer,
@@ -77,6 +78,7 @@ impl Syncer {
             analyzer,
             last_error_timestamp: AtomicU64::new(0),
             resync_requested: AtomicBool::new(false),
+            sync_task_running: AtomicBool::new(false),
         }
     }
 
@@ -315,11 +317,31 @@ impl Syncer {
             return;
         }
 
+        if !self.try_claim_sync_task() {
+            debug!("sync task is already running");
+            return;
+        }
+
         info!("Spawning sync task");
         tokio::spawn({
             let this = self.clone();
-            async move { this.sync_task().await }.instrument(tracing::info_span!("sync_task"))
+            async move {
+                this.sync_task().await;
+                this.release_sync_task();
+            }
+            .instrument(tracing::info_span!("sync_task"))
         });
+    }
+
+    fn try_claim_sync_task(&self) -> bool {
+        try_claim_sync_task_flag(&self.sync_task_running)
+    }
+
+    fn release_sync_task(self: &Arc<Self>) {
+        self.sync_task_running.store(false, Ordering::SeqCst);
+        if !self.shutting_down.load(Ordering::SeqCst) && !self.is_synced() {
+            self.spawn_sync_task_impl();
+        }
     }
 
     fn spawn_sync_task(self: &Arc<Self>, last_known_block: BlueScoredChainBlockHash) {
@@ -330,6 +352,12 @@ impl Syncer {
         last_known_block_guard.replace(last_known_block);
         self.spawn_sync_task_impl();
     }
+}
+
+fn try_claim_sync_task_flag(sync_task_running: &AtomicBool) -> bool {
+    sync_task_running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
 }
 
 impl ConsumerT for Syncer {
@@ -745,7 +773,7 @@ mod tests {
             subnetwork_id: None,
             gas: None,
             payload: None,
-            mass: None,
+            storage_mass: None,
             verbose_data,
         }
     }
@@ -809,6 +837,17 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn sync_task_claim_allows_only_one_runner() {
+        let running = AtomicBool::new(false);
+
+        assert!(try_claim_sync_task_flag(&running));
+        assert!(!try_claim_sync_task_flag(&running));
+
+        running.store(false, Ordering::SeqCst);
+        assert!(try_claim_sync_task_flag(&running));
     }
 
     #[test]

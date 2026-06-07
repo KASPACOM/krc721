@@ -719,6 +719,7 @@ mod tests {
     fn accepts_minimum_toc_5_and_newer_versions() {
         assert!(is_supported_kaspad_version("1.3.0-toc.5"));
         assert!(is_supported_kaspad_version("kaspad v1.3.0-toc.5-04b0d135"));
+        assert!(is_supported_kaspad_version("kaspad v2.0.0"));
         assert!(is_supported_kaspad_version("1.3.0"));
         assert!(is_supported_kaspad_version("1.3.1-toc.1"));
     }
