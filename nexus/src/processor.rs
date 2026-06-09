@@ -597,24 +597,84 @@ impl Processor {
         removed_blocks: &[RpcHash],
     ) -> Result<Option<u64>> {
         let mut min_blue_score = u64::MAX;
+        let mut found_removed_block = false;
         for block in removed_blocks {
-            let Some(score) = self.db.blockhash_to_score.get_wtx(tx, block)? else {
-                warn!("Block {} not found in blockhash_to_score. Ignoring.", block);
+            let Some(score) = self.lookup_removed_block_score(tx, block)? else {
+                warn!("Block {} not found in chain state. Ignoring.", block);
                 continue;
             };
+            found_removed_block = true;
             min_blue_score = min_blue_score.min(score);
-            self.db.chain_block_scores.remove_wtx(
-                tx,
-                &BlueScoredChainBlockHash {
-                    blue_score: score,
-                    block_hash: *block,
-                },
-            )?;
             self.db.blockhash_to_score.remove_wtx(tx, block)?;
         }
         debug!("Reorg complete minimum blue score {}", min_blue_score);
 
+        if !found_removed_block {
+            return Ok(None);
+        }
+
+        self.remove_chain_state_from_blue_score(tx, min_blue_score)?;
+
         Ok(Some(min_blue_score))
+    }
+
+    fn remove_chain_state_from_blue_score(
+        &self,
+        tx: &mut WriteTransaction,
+        min_blue_score: u64,
+    ) -> krc721_database::result::Result<()> {
+        let blocks_to_remove = self
+            .db
+            .chain_block_scores
+            .range_wtx(
+                tx,
+                BlueScoredChainBlockHash {
+                    blue_score: min_blue_score,
+                    block_hash: RpcHash::default(),
+                }..,
+            )
+            .map(|res| res.map(|(block, _)| block))
+            .collect::<krc721_database::result::Result<Vec<_>>>()?;
+
+        if !blocks_to_remove.is_empty() {
+            warn!(
+                "Removing {} chain block scores from reorg threshold {}",
+                blocks_to_remove.len(),
+                min_blue_score
+            );
+        }
+
+        for block in blocks_to_remove {
+            self.db.chain_block_scores.remove_wtx(tx, &block)?;
+            self.db
+                .blockhash_to_score
+                .remove_wtx(tx, &block.block_hash)?;
+        }
+
+        Ok(())
+    }
+
+    fn lookup_removed_block_score(
+        &self,
+        tx: &mut WriteTransaction,
+        block: &RpcHash,
+    ) -> krc721_database::result::Result<Option<u64>> {
+        if let Some(score) = self.db.blockhash_to_score.get_wtx(tx, block)? {
+            return Ok(Some(score));
+        }
+
+        let Some(last_accepted) = self.db.chain_block_scores.last_accepted_block_wtx(tx)? else {
+            return Ok(None);
+        };
+        if last_accepted.block_hash == *block {
+            warn!(
+                "Block {} missing from blockhash_to_score; recovered score {} from chain_block_scores tip",
+                block, last_accepted.blue_score
+            );
+            return Ok(Some(last_accepted.blue_score));
+        }
+
+        Ok(None)
     }
 
     /// Remove NFT operations above the given score threshold to maintain consistency after reorg.
@@ -1914,6 +1974,173 @@ mod tests {
         assert!(db
             .operation_history
             .get_rtx(&rtx, &send_op_score)
+            .unwrap()
+            .is_none());
+
+        drop(rtx);
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn reorg_removal_recovers_tip_score_when_reverse_block_index_is_missing() {
+        let db_folder = temp_db_folder("reorg_missing_reverse_block_index");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+
+        let stale_block = RpcHash::from_le_u64([0x51, 0x52, 0x53, 0x54]);
+        let block_score = 1_000;
+        let op_score = calculate_tx_score_from_blue(block_score);
+        let tx_id = dummy_tx_id(0x66);
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let sender = dummy_pubkey_spk(0xAA);
+        let receiver = dummy_pubkey_spk(0xBB);
+        let checked_op = CheckedOperation {
+            operation: Operation {
+                common: OperationCommon {
+                    tick,
+                    tx_id,
+                    block_time: 0,
+                    sender,
+                    fee: 0,
+                    accepting_block_daa_score: 0,
+                },
+                info: OperationInfo::Transfer(TransferInfo {
+                    token_id: 7,
+                    to: receiver,
+                }),
+            },
+            error: None,
+        };
+
+        {
+            let mut wtx = db.write_tx();
+            db.chain_block_scores
+                .insert_wtx(
+                    &mut wtx,
+                    BlueScoredChainBlockHash {
+                        blue_score: block_score,
+                        block_hash: stale_block,
+                    },
+                    &(),
+                )
+                .unwrap();
+            // Deliberately do not seed blockhash_to_score. Production logs showed
+            // stale tips in chain_block_scores without the reverse lookup.
+            db.operation_history
+                .insert_wtx(&mut wtx, op_score, &checked_op)
+                .unwrap();
+            db.tx_id_to_opscore
+                .insert_wtx(&mut wtx, tx_id, &op_score)
+                .unwrap();
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        {
+            let mut wtx = db.write_tx();
+            let diff = processor.process_removal(&mut wtx, &[stale_block]).unwrap();
+            assert_eq!(diff.transfers, 1);
+            wtx.commit().unwrap().expect("reorg commit");
+        }
+
+        let rtx = db.read_tx();
+        assert!(db
+            .operation_history
+            .get_rtx(&rtx, &op_score)
+            .unwrap()
+            .is_none());
+        assert!(db.tx_id_to_opscore.get_rtx(&rtx, &tx_id).unwrap().is_none());
+        assert!(db
+            .chain_block_scores
+            .last_accepted_block_rtx(&rtx)
+            .unwrap()
+            .is_none());
+
+        drop(rtx);
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn reorg_removal_prunes_later_chain_blocks_so_deleted_ops_can_replay() {
+        let db_folder = temp_db_folder("reorg_prunes_later_chain_blocks");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+
+        let stale_block = RpcHash::from_le_u64([0x71, 0x72, 0x73, 0x74]);
+        let later_block = RpcHash::from_le_u64([0x81, 0x82, 0x83, 0x84]);
+        let stale_score = 1_000;
+        let later_score = 1_001;
+        let later_op_score = calculate_tx_score_from_blue(later_score);
+        let tx_id = dummy_tx_id(0x88);
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let sender = dummy_pubkey_spk(0xAA);
+        let receiver = dummy_pubkey_spk(0xBB);
+        let later_op = CheckedOperation {
+            operation: Operation {
+                common: OperationCommon {
+                    tick,
+                    tx_id,
+                    block_time: 0,
+                    sender,
+                    fee: 0,
+                    accepting_block_daa_score: 0,
+                },
+                info: OperationInfo::Transfer(TransferInfo {
+                    token_id: 11,
+                    to: receiver,
+                }),
+            },
+            error: None,
+        };
+
+        {
+            let mut wtx = db.write_tx();
+            for (score, block) in [(stale_score, stale_block), (later_score, later_block)] {
+                db.chain_block_scores
+                    .insert_wtx(
+                        &mut wtx,
+                        BlueScoredChainBlockHash {
+                            blue_score: score,
+                            block_hash: block,
+                        },
+                        &(),
+                    )
+                    .unwrap();
+                db.blockhash_to_score
+                    .insert_wtx(&mut wtx, block, &score)
+                    .unwrap();
+            }
+            db.operation_history
+                .insert_wtx(&mut wtx, later_op_score, &later_op)
+                .unwrap();
+            db.tx_id_to_opscore
+                .insert_wtx(&mut wtx, tx_id, &later_op_score)
+                .unwrap();
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        {
+            let mut wtx = db.write_tx();
+            let diff = processor.process_removal(&mut wtx, &[stale_block]).unwrap();
+            assert_eq!(diff.transfers, 1);
+            wtx.commit().unwrap().expect("reorg commit");
+        }
+
+        let rtx = db.read_tx();
+        assert!(db
+            .operation_history
+            .get_rtx(&rtx, &later_op_score)
+            .unwrap()
+            .is_none());
+        assert!(db
+            .chain_block_scores
+            .last_accepted_block_rtx(&rtx)
+            .unwrap()
+            .is_none());
+        assert!(db
+            .blockhash_to_score
+            .get_rtx(&rtx, &later_block)
             .unwrap()
             .is_none());
 
