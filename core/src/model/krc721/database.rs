@@ -273,6 +273,7 @@ pub struct ScoredCheckedOperation {
 #[derive(Debug, BorshDeserialize, BorshSerialize, Default, Clone)]
 pub struct VirtualChainChanges {
     pub removed_chain_block_hashes: Arc<Vec<RpcHash>>,
+    pub forced_rollback_blue_score: Option<BlueScore>,
     pub mergesets: Vec<Mergeset>,
 }
 

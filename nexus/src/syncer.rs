@@ -145,6 +145,7 @@ impl Syncer {
                 continue;
             };
 
+            let mut forced_rollback_blue_score = None;
             if from.blue_score >= sink.blue_score
                 && from.block_hash != sink.block_hash
                 && !removed_chain_block_hashes.contains(&from.block_hash)
@@ -156,6 +157,7 @@ impl Syncer {
                 let mut removed = (*removed_chain_block_hashes).clone();
                 removed.push(from.block_hash);
                 removed_chain_block_hashes = Arc::new(removed);
+                forced_rollback_blue_score = Some(from.blue_score);
             }
 
             if let Err(err) = validate_historical_acceptance_coverage(
@@ -213,6 +215,7 @@ impl Syncer {
             let notification = VirtualChainChanges {
                 // who cares about that arc?? no one
                 removed_chain_block_hashes,
+                forced_rollback_blue_score,
                 mergesets,
             };
 
@@ -305,6 +308,7 @@ impl Syncer {
 
         let notification = VirtualChainChanges {
             removed_chain_block_hashes: Arc::new(vec![]),
+            forced_rollback_blue_score: None,
             mergesets: vec![],
         };
         if let Err(err) = self
