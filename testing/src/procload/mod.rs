@@ -732,6 +732,7 @@ impl ProcLoad {
             if let Some(pre_state) = current_state {
                 let vcc = VirtualChainChanges {
                     removed_chain_block_hashes: Arc::new(Vec::new()),
+                    forced_rollback_blue_score: None,
                     mergesets: mergesets.clone(),
                 };
 
@@ -746,6 +747,7 @@ impl ProcLoad {
         // Prepare the notification
         let notification = VirtualChainChanges {
             removed_chain_block_hashes: Arc::new(removed_chain_block_hashes),
+            forced_rollback_blue_score: None,
             mergesets,
         };
 
