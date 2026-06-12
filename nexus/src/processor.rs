@@ -159,6 +159,11 @@ impl Processor {
             .map_err(Error::HistoricalApplication)
     }
 
+    pub fn last_accepted_block(&self) -> Result<Option<BlueScoredChainBlockHash>> {
+        let rtx = self.db.read_tx();
+        Ok(self.db.chain_block_scores.last_accepted_block_rtx(&rtx)?)
+    }
+
     pub fn switch_to_queue_mod(&self) -> Result<(), SendError<RTNotification>> {
         self.realtime_sender.send(RTNotification::SwitchToQueue)
     }

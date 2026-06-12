@@ -235,7 +235,20 @@ impl Syncer {
                 continue;
             }
 
-            let next_last_known_block = last_added_chain_block.unwrap_or(sink);
+            let next_last_known_block = match last_added_chain_block {
+                Some(block) => block,
+                None => match self.processor.last_accepted_block() {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        error!("No accepted chain block remains after historical replay");
+                        continue;
+                    }
+                    Err(err) => {
+                        error!("Failed to read last accepted block after historical replay: {err}");
+                        continue;
+                    }
+                },
+            };
             if let Some(v) = self.last_known_block.lock().unwrap().as_mut() {
                 *v = next_last_known_block;
                 debug!(target: "last_known_block_tracking", "Last known block is updated to: {:?}", next_last_known_block);
@@ -418,7 +431,7 @@ fn classify_target_progress(
         Some(last_added_chain_block) if last_added_chain_block.blue_score >= target.blue_score => {
             TargetProgress::Obsolete
         }
-        None => TargetProgress::Reached,
+        None => TargetProgress::Pending,
         _ => TargetProgress::Pending,
     }
 }
@@ -955,7 +968,7 @@ mod tests {
 
         assert_eq!(
             classify_target_progress(&[], None, target),
-            TargetProgress::Reached
+            TargetProgress::Pending
         );
         assert_eq!(
             classify_target_progress(&[target.block_hash], Some(later), target),
