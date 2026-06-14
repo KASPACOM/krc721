@@ -3,7 +3,7 @@ use crate::imports::*;
 // use krc721_nexus::processor::VirtualChainChanges;
 use kaspa_rpc_core::VirtualChainChangedNotification;
 use krc721_nexus::analyzer::Analyzer;
-use krc721_nexus::syncer::process_acceptance_data;
+use krc721_nexus::syncer::{process_acceptance_data, validate_acceptance_data_coverage};
 
 struct Inner {
     #[allow(unused)]
@@ -36,6 +36,8 @@ impl ConsumerT for Recorder {
             added_acceptance_data,
         }: VirtualChainChangedNotification,
     ) -> NexusResult<()> {
+        validate_acceptance_data_coverage(&added_chain_block_hashes, &added_acceptance_data)?;
+
         let mergesets = process_acceptance_data(
             added_chain_block_hashes.as_slice(),
             added_acceptance_data.as_slice(),

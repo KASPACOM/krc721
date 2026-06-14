@@ -7,7 +7,7 @@ use std::{
 use crate::analyzer::detect_krc20;
 use crate::analyzer::Analyzer;
 use crate::imports::*;
-use crate::syncer::process_acceptance_data;
+use crate::syncer::{process_acceptance_data, validate_acceptance_data_coverage};
 use ahash::AHashSet;
 use kaspa_rpc_core::VirtualChainChangedNotification;
 
@@ -155,6 +155,8 @@ impl ConsumerT for Notifier {
             added_acceptance_data,
         }: VirtualChainChangedNotification,
     ) -> Result<()> {
+        validate_acceptance_data_coverage(&added_chain_block_hashes, &added_acceptance_data)?;
+
         let mergesets = process_acceptance_data(
             added_chain_block_hashes.as_slice(),
             added_acceptance_data.as_slice(),

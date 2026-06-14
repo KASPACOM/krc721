@@ -122,6 +122,14 @@ impl Syncer {
                 continue;
             };
 
+            if let Err(err) =
+                validate_acceptance_data_coverage(&added_chain_block_hashes, &added_acceptance_data)
+            {
+                error!("Historical acceptance data is incomplete: {:?}", err);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                continue;
+            }
+
             let target_is_reached = {
                 let target = *self.target.lock().unwrap().get_or_insert_with(|| {
                     debug!("Setting target to sink {sink:?}");
@@ -237,6 +245,8 @@ impl ConsumerT for Syncer {
             added_acceptance_data,
         }: VirtualChainChangedNotification,
     ) -> Result<()> {
+        validate_acceptance_data_coverage(&added_chain_block_hashes, &added_acceptance_data)?;
+
         let last_known_block = added_acceptance_data.last().and_then(|d| {
             added_chain_block_hashes
                 .last()
@@ -284,6 +294,21 @@ impl ConsumerT for Syncer {
         }
         Ok(())
     }
+}
+
+pub fn validate_acceptance_data_coverage(
+    added_chain_block_hashes: &[RpcHash],
+    added_acceptance_data: &[RpcAcceptanceData],
+) -> Result<()> {
+    if added_chain_block_hashes.len() != added_acceptance_data.len() {
+        return Err(Error::custom(format!(
+            "added chain block count {} does not match acceptance record count {}",
+            added_chain_block_hashes.len(),
+            added_acceptance_data.len()
+        )));
+    }
+
+    Ok(())
 }
 
 pub fn process_acceptance_data(
@@ -397,4 +422,86 @@ pub trait SyncerT: Send + Sync + 'static {
     fn last_known_block(&self) -> Option<BlueScoredChainBlockHash>;
     fn spawn(self: Arc<Self>, last_known_block: RpcHash);
     fn shutdown(&self);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kaspa_addresses::Prefix;
+    use kaspa_rpc_core::RpcMergesetBlockAcceptanceData;
+
+    fn hash(word: u64) -> RpcHash {
+        RpcHash::from_le_u64([word, 0, 0, 0])
+    }
+
+    fn acceptance(accepting_blue_score: u64, merged_blocks: &[RpcHash]) -> RpcAcceptanceData {
+        RpcAcceptanceData {
+            accepting_blue_score,
+            accepting_daa_score: 24,
+            mergeset_block_acceptance_data: merged_blocks
+                .iter()
+                .copied()
+                .map(|merged_block_hash| RpcMergesetBlockAcceptanceData {
+                    merged_block_hash,
+                    merged_block_timestamp: 100,
+                    accepted_transactions: vec![],
+                })
+                .collect(),
+        }
+    }
+
+    fn analyzer() -> Analyzer {
+        Analyzer::new(None, Default::default(), Prefix::Mainnet, Arc::new([]), 0)
+    }
+
+    #[test]
+    fn native_acceptance_coverage_requires_one_record_per_added_block() {
+        let first = hash(0x11);
+        let second = hash(0x22);
+
+        let err = validate_acceptance_data_coverage(&[first, second], &[acceptance(42, &[first])])
+            .unwrap_err();
+
+        assert!(err.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn native_acceptance_coverage_accepts_matching_counts() {
+        let first = hash(0x11);
+        let second = hash(0x22);
+
+        validate_acceptance_data_coverage(
+            &[first, second],
+            &[acceptance(42, &[first]), acceptance(43, &[second])],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn native_grouped_acceptance_preserves_empty_merged_blocks_in_entropy() {
+        let accepted_chain = hash(0x11);
+        let selected_parent = hash(0x22);
+        let empty_merged = hash(0x33);
+
+        let mergesets = process_acceptance_data(
+            &[accepted_chain],
+            &[acceptance(42, &[selected_parent, empty_merged])],
+            &analyzer(),
+        );
+
+        assert_eq!(mergesets.len(), 1);
+        assert_eq!(mergesets[0].accepted_chain_block_hash, accepted_chain);
+        assert_eq!(mergesets[0].blue_score, 42);
+        assert_eq!(mergesets[0].operations.len(), 0);
+
+        let mut expected = MergesetEntropyBuilder::default();
+        expected.add_block_hash(&selected_parent);
+        expected.add_block_hash(&empty_merged);
+
+        let mut without_empty = MergesetEntropyBuilder::default();
+        without_empty.add_block_hash(&selected_parent);
+
+        assert_eq!(mergesets[0].entropy, expected.finalize());
+        assert_ne!(mergesets[0].entropy, without_empty.finalize());
+    }
 }
