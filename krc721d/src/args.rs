@@ -267,9 +267,13 @@ impl Args {
             enable_http_server = true;
         }
 
-        let http_listen = matches.get_one::<String>("http-listen").cloned();
+        let http_listen = matches
+            .get_one::<ContextualNetAddress>("http-listen")
+            .map(ToString::to_string);
 
-        let rpc_listen = matches.get_one::<String>("rpc-listen").cloned();
+        let rpc_listen = matches
+            .get_one::<ContextualNetAddress>("rpc-listen")
+            .map(ToString::to_string);
 
         let node_rpc = matches.get_one::<String>("node-rpc").cloned();
 
