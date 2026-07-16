@@ -19,6 +19,9 @@ pub enum Mode {
     SyncReset {
         server: Option<String>,
     },
+    Rewind {
+        blue_score: u64,
+    },
     Purge,
 }
 
@@ -39,6 +42,7 @@ pub struct Args {
     pub utxo_index: bool,
     pub remote: bool,
     pub dry_run: bool,
+    pub yes: bool,
     pub get_genesis: bool,
     pub init_genesis: Option<String>,
     pub retention_period_days: Option<u32>,
@@ -69,13 +73,40 @@ impl Args {
             .arg(arg!(--daemon "Spawn as Rusty Kaspa p2p daemon").hide(true))
             .arg(arg!(--local "Spawn Rusty Kaspa p2p node daemon as a child process"))
             .arg(arg!(--purge "Erase indexer database (use with caution)"))
+            .arg(
+                Arg::new("rewind-blue-score")
+                    .long("rewind-blue-score")
+                    .value_name("blue-score")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(u64))
+                    .conflicts_with_all([
+                        "archive",
+                        "restore",
+                        "sync",
+                        "sync-reset",
+                        "purge",
+                        "cluster",
+                        "notifier",
+                        "http",
+                        "local",
+                        "daemon",
+                    ])
+                    .help("Rewind derived indexer state inclusively from a blue score so it can be replayed"),
+            )
             .arg(arg!(--utxoindex "Enable UTXO index in the local Rusty Kaspa node"))
             .arg(
                 Arg::new("dry-run")
                     .long("dry-run")
                     .value_name("dry-run")
                     .num_args(0)
-                    .help("Dry run mode (applicable to sync)"),
+                    .help("Dry run mode (applicable to sync and rewind)"),
+            )
+            .arg(
+                Arg::new("yes")
+                    .long("yes")
+                    .num_args(0)
+                    .requires("rewind-blue-score")
+                    .help("Confirm a rewind non-interactively after validation"),
             )
             .arg(
                 Arg::new("trace-sync")
@@ -215,6 +246,7 @@ impl Args {
         let is_purge = matches.get_flag("purge");
         let is_notifier = matches.get_flag("notifier");
         let dry_run = matches.get_flag("dry-run");
+        let yes = matches.get_flag("yes");
         let utxo_index = matches.get_flag("utxoindex");
         let daa_ecdsa_fix = matches.get_one::<u64>("daa-ecdsa-fix").copied();
 
@@ -238,6 +270,10 @@ impl Args {
         } else if matches.contains_id("sync-reset") {
             Mode::SyncReset {
                 server: matches.get_one::<String>("sync-reset").cloned(),
+            }
+        } else if let Some(blue_score) = matches.get_one::<u64>("rewind-blue-score") {
+            Mode::Rewind {
+                blue_score: *blue_score,
             }
         } else if is_purge {
             Mode::Purge
@@ -315,6 +351,7 @@ impl Args {
             utxo_index,
             remote,
             dry_run,
+            yes,
             get_genesis,
             init_genesis,
             retention_period_days,

@@ -18,6 +18,9 @@ pub enum Error {
     Nexus(#[from] krc721_nexus::error::Error),
 
     #[error(transparent)]
+    Processor(#[from] krc721_nexus::processor::Error),
+
+    #[error(transparent)]
     Http(#[from] krc721_http_server::error::Error),
 
     #[error(transparent)]

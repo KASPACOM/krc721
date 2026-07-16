@@ -123,6 +123,7 @@ impl Server {
                 utxo_index,
                 remote,
                 dry_run,
+                yes,
                 init_genesis,
                 get_genesis,
                 retention_period_days,
@@ -524,6 +525,50 @@ impl Server {
                     }
                     println!();
 
+                    Ok(None)
+                }
+                Mode::Rewind { blue_score } => {
+                    use cliclack::*;
+
+                    let db = Arc::new(Db::try_open(folders.data, &network)?);
+                    let metrics = Metrics::try_new(db.clone(), network)?;
+                    let counters = metrics.counters().clone();
+                    let processor = Processor::new(db, counters, None, None);
+                    let last = processor
+                        .last_accepted_block()?
+                        .ok_or_else(|| krc721_nexus::processor::Error::NoAcceptedBlockForRewind)?;
+                    if blue_score > last.blue_score {
+                        return Err(krc721_nexus::processor::Error::RewindBeyondTip {
+                            requested: blue_score,
+                            tip: last.blue_score,
+                        }
+                        .into());
+                    }
+
+                    println!();
+                    intro("KRC721 database rewind")?;
+                    log::warning(format!(
+                        "This removes and rebuilds derived state inclusively from blue score {blue_score}; current tip is {} ({})",
+                        last.blue_score, last.block_hash
+                    ))?;
+                    if dry_run {
+                        outro("Dry run complete; database was not changed")?;
+                        return Ok(None);
+                    }
+                    if !yes
+                        && !confirm("Proceed with the validated rewind?")
+                            .initial_value(false)
+                            .interact()?
+                    {
+                        log::warning("Database rewind aborted")?;
+                        return Ok(None);
+                    }
+
+                    processor.rewind_from_blue_score(blue_score)?;
+                    let last = processor.last_accepted_block()?;
+                    outro(format!(
+                        "Database rewind is complete; retained last accepted block: {last:?}"
+                    ))?;
                     Ok(None)
                 }
                 Mode::SyncReset { server } => {

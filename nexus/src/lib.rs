@@ -45,6 +45,13 @@ pub fn calculate_tx_score_from_blue(blue_score: u64) -> u64 {
     calculate_tx_score(blue_score, 0, 0)
 }
 
+/// Convert a blue score to its first operation score, rejecting overflow.
+pub fn checked_tx_score_from_blue(blue_score: u64) -> Option<u64> {
+    blue_score
+        .checked_mul(MERGE_SET_LIMIT)?
+        .checked_mul(BLOCK_TX_CAPACITY)
+}
+
 pub fn calculate_tx_score(
     blue_score: u64,
     block_tx_index_within_mergeset: u64,
@@ -57,4 +64,18 @@ pub fn calculate_tx_score(
 
 pub fn calculate_blue_score_from_tx_score(tx_score: u64) -> u64 {
     tx_score / (MERGE_SET_LIMIT * BLOCK_TX_CAPACITY)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checked_blue_score_conversion_rejects_overflow() {
+        assert_eq!(
+            checked_tx_score_from_blue(42),
+            Some(calculate_tx_score_from_blue(42))
+        );
+        assert_eq!(checked_tx_score_from_blue(u64::MAX), None);
+    }
 }

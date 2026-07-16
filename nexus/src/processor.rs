@@ -1,5 +1,5 @@
 use crate::metrics::Counters;
-use crate::{calculate_blue_score_from_tx_score, calculate_tx_score, calculate_tx_score_from_blue};
+use crate::{calculate_blue_score_from_tx_score, calculate_tx_score, checked_tx_score_from_blue};
 use ahash::AHashMap;
 use async_std::channel::Sender;
 use async_trait::async_trait;
@@ -162,6 +162,27 @@ impl Processor {
     pub fn last_accepted_block(&self) -> Result<Option<BlueScoredChainBlockHash>> {
         let rtx = self.db.read_tx();
         Ok(self.db.chain_block_scores.last_accepted_block_rtx(&rtx)?)
+    }
+
+    /// Inclusively removes derived state at and above `blue_score` for canonical replay.
+    pub fn rewind_from_blue_score(&self, blue_score: u64) -> Result<()> {
+        let tip = self
+            .last_accepted_block()?
+            .ok_or(Error::NoAcceptedBlockForRewind)?;
+        if blue_score > tip.blue_score {
+            return Err(Error::RewindBeyondTip {
+                requested: blue_score,
+                tip: tip.blue_score,
+            });
+        }
+        let mut tx = self.db.write_tx();
+        let stats_diffs = self.process_removal(&mut tx, &[], Some(blue_score))?;
+        let stats = self.db.stats.removal(&mut tx, stats_diffs)?;
+        tx.commit()
+            .map_err(krc721_database::error::Error::Fjall)?
+            .map_err(|_| Error::RewindWriteConflict)?;
+        self.counters.update_from_stats(&stats);
+        Ok(())
     }
 
     pub fn switch_to_queue_mod(&self) -> Result<(), SendError<RTNotification>> {
@@ -367,7 +388,8 @@ impl Processor {
         };
 
         // Step 2: Calculate transaction score threshold for dependent data cleanup
-        let tx_score_threshold = calculate_tx_score_from_blue(min_blue_score);
+        let tx_score_threshold = checked_tx_score_from_blue(min_blue_score)
+            .ok_or(Error::BlueScoreOverflow(min_blue_score))?;
 
         // Step 3: Remove NFT operations above the score threshold to maintain consistency
         stat_diffs = self.remove_affected_operations(tx, tx_score_threshold)?;
@@ -1721,6 +1743,7 @@ struct ContextOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calculate_tx_score_from_blue;
     use kaspa_consensus_core::tx::{ScriptPublicKey, ScriptVec, TransactionId};
     use kaspa_txscript::pay_to_script_hash_script;
     use krc721_core::network::Network;
@@ -2083,8 +2106,8 @@ mod tests {
     }
 
     #[test]
-    fn reorg_removal_prunes_later_chain_blocks_so_deleted_ops_can_replay() {
-        let db_folder = temp_db_folder("reorg_prunes_later_chain_blocks");
+    fn forced_reorg_removal_prunes_later_blocks_and_counts_removed_operations() {
+        let db_folder = temp_db_folder("forced_reorg_prunes_later_chain_blocks");
         let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
         let counters = Arc::new(Counters::default());
         let processor = Processor::new(db.clone(), counters, None, None);
@@ -2145,7 +2168,7 @@ mod tests {
         {
             let mut wtx = db.write_tx();
             let diff = processor
-                .process_removal(&mut wtx, &[stale_block], None)
+                .process_removal(&mut wtx, &[stale_block], Some(stale_score))
                 .unwrap();
             assert_eq!(diff.transfers, 1);
             wtx.commit().unwrap().expect("reorg commit");
@@ -2173,13 +2196,12 @@ mod tests {
     }
 
     #[test]
-    fn forced_reorg_removal_prunes_when_stale_block_is_absent_from_indexes() {
-        let db_folder = temp_db_folder("forced_reorg_stale_block_absent");
+    fn rewind_from_blue_score_prunes_derived_state_without_a_removed_block_index() {
+        let db_folder = temp_db_folder("rewind_without_removed_block_index");
         let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
         let counters = Arc::new(Counters::default());
         let processor = Processor::new(db.clone(), counters, None, None);
 
-        let stale_block = RpcHash::from_le_u64([0x91, 0x92, 0x93, 0x94]);
         let later_block = RpcHash::from_le_u64([0xA1, 0xA2, 0xA3, 0xA4]);
         let stale_score = 1_000;
         let later_score = 1_001;
@@ -2230,14 +2252,11 @@ mod tests {
             wtx.commit().unwrap().expect("seed commit");
         }
 
-        {
-            let mut wtx = db.write_tx();
-            let diff = processor
-                .process_removal(&mut wtx, &[stale_block], Some(stale_score))
-                .unwrap();
-            assert_eq!(diff.transfers, 1);
-            wtx.commit().unwrap().expect("reorg commit");
-        }
+        assert!(matches!(
+            processor.rewind_from_blue_score(later_score + 1),
+            Err(Error::RewindBeyondTip { .. })
+        ));
+        processor.rewind_from_blue_score(stale_score).unwrap();
 
         let rtx = db.read_tx();
         assert!(db
