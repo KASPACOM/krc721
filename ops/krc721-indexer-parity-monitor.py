@@ -286,6 +286,8 @@ def check_statuses(report, failures, blue_lag_tolerance, check_legacy=False):
             failures.append(f"{name}: node not connected")
         if status.get("isNodeSynced") is not True:
             failures.append(f"{name}: node not synced")
+        if status.get("isIndexerSynced") is not True:
+            failures.append(f"{name}: indexer not synced")
 
     prod2 = statuses.get("prod2")
     prod1 = statuses.get("prod1")

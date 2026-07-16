@@ -54,6 +54,7 @@ class ParityMonitorTests(unittest.TestCase):
         prod1 = {
             "isNodeConnected": True,
             "isNodeSynced": True,
+            "isIndexerSynced": True,
             "blueScore": 1_000,
             "currentOpScore": 248_000_000,
             "lastKnownBlockHash": "a",
@@ -114,6 +115,29 @@ class ParityMonitorTests(unittest.TestCase):
             monitor.check_statuses({}, same_tip_failures, 360)
         self.assertEqual(len(same_tip_failures), 1)
         self.assertIn("identical indexed tip", same_tip_failures[0])
+
+    def test_unsynced_indexer_is_a_failure(self):
+        status = {
+            "isNodeConnected": True,
+            "isNodeSynced": True,
+            "isIndexerSynced": False,
+            "blueScore": 1_000,
+            "currentOpScore": 248_000_000,
+            "lastKnownBlockHash": "a",
+            "tokenDeploymentsTotal": 1,
+            "tokenMintsTotal": 2,
+            "tokenTransfersTotal": 3,
+            "tokenListingsTotal": 4,
+            "tokenSendsTotal": 5,
+            "powFeesTotal": 6,
+            "royaltyFeesTotal": 7,
+        }
+
+        with mock.patch.object(monitor, "safe_fetch_json", return_value=success(status)):
+            failures = []
+            monitor.check_statuses({}, failures, 360)
+
+        self.assertEqual(failures, ["prod1: indexer not synced", "prod2: indexer not synced"])
 
     def test_symmetric_feed_detects_an_op_missing_from_prod1(self):
         common = {
