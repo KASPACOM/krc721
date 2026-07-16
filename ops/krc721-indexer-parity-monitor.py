@@ -531,7 +531,7 @@ def check_known_txs(report, failures):
     report["known_txs"] = known
 
 
-def check_hosts(report, failures, expected_commit=None):
+def check_hosts(report, failures, expected_commit=None, expected_binary_sha256=None):
     hosts = {}
     warnings = report.setdefault("warnings", [])
     for name, info in HOSTS.items():
@@ -573,6 +573,11 @@ def check_hosts(report, failures, expected_commit=None):
             failures.append(f"{name}: proxy service {snapshot.get('proxy_service')}")
         if expected_commit and snapshot.get("commit") != expected_commit:
             failures.append(f"{name}: commit {snapshot.get('commit')} expected {expected_commit}")
+        if expected_binary_sha256 and snapshot.get("binary_sha256") != expected_binary_sha256:
+            failures.append(
+                f"{name}: binary SHA-256 {snapshot.get('binary_sha256')} "
+                f"expected {expected_binary_sha256}"
+            )
         try:
             sync_errors = int(snapshot.get("sync_task_errors", "0"))
         except ValueError:
@@ -740,6 +745,7 @@ def main():
     parser.add_argument("--ops-window", type=int, default=100)
     parser.add_argument("--blue-lag-tolerance", type=int, default=360)
     parser.add_argument("--expected-commit", default="")
+    parser.add_argument("--expected-binary-sha256", default="")
     parser.add_argument("--check-legacy", action="store_true")
     parser.add_argument("--no-alert", action="store_true")
     args = parser.parse_args()
@@ -750,7 +756,12 @@ def main():
     escalate_persistent_counter_drift(report, failures)
     check_recent_ops(report, failures, args.ops_window, check_legacy=args.check_legacy)
     check_known_txs(report, failures)
-    check_hosts(report, failures, args.expected_commit)
+    check_hosts(
+        report,
+        failures,
+        args.expected_commit,
+        args.expected_binary_sha256,
+    )
     report["ok"] = not failures
     report["failures"] = failures
     maybe_alert(report, failures, no_alert=args.no_alert)

@@ -17,6 +17,39 @@ def success(result):
 
 
 class ParityMonitorTests(unittest.TestCase):
+    def test_expected_binary_sha_is_enforced_per_host(self):
+        snapshots = {
+            "prod1": {
+                "ssh_ok": True,
+                "service": "active",
+                "node_service": "active",
+                "nginx_route_http": "200",
+                "exec_start": "ws://127.0.0.1:17110",
+                "node_exec_start": "/home/krc721-pr11-prod1/repo/target/release/krc721d",
+                "commit": "4a0cc53",
+                "version": "v2.0.0-4a0cc53",
+                "binary_sha256": "unexpected",
+            },
+            "prod2": {
+                "ssh_ok": True,
+                "service": "active",
+                "node_service": "active",
+                "proxy_service": "active",
+                "exec_start": "ws://127.0.0.1:17110",
+                "commit": "4a0cc53",
+                "version": "v2.0.0-4a0cc53",
+                "binary_sha256": "unexpected",
+                "forbidden_process_count": "0",
+            },
+        }
+        failures = []
+        with mock.patch.object(
+            monitor, "host_snapshot", side_effect=lambda name, _info: snapshots[name]
+        ):
+            monitor.check_hosts({}, failures, "4a0cc53", "approved")
+
+        self.assertEqual(sum("binary SHA-256" in failure for failure in failures), 2)
+
     def test_moving_tip_counter_drift_escalates_only_when_persistent(self):
         prod1 = {
             "isNodeConnected": True,

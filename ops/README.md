@@ -2,7 +2,14 @@
 
 The monitor compares prod1 and prod2 symmetrically, validates all operation and fee counters, checks known incident transactions, verifies host services, and requires the deployed binary SHA-256 to match on both hosts.
 
-Install the script and units on the monitoring host, run `systemctl daemon-reload`, and enable `krc721-indexer-parity-monitor.timer`. The monitor alerts after two consecutive failures and repeats an active alert at most hourly.
+Install the script and units on the monitoring host, write the approved release values to `/etc/krc721-indexer-parity-monitor.env`, run `systemctl daemon-reload`, and enable `krc721-indexer-parity-monitor.timer`. The monitor alerts after two consecutive failures and repeats an active alert at most hourly.
+
+```ini
+EXPECTED_COMMIT=<approved-short-commit>
+EXPECTED_BINARY_SHA256=<approved-release-sha256>
+```
+
+Update both values atomically whenever an approved binary is deployed. This pins parity to the reviewed artifact instead of merely proving that both hosts run the same artifact.
 
 Run the unit tests with:
 
