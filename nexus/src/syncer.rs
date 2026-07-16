@@ -1078,7 +1078,7 @@ mod tests {
                 .map(RpcOptionalTransactionOutput::from)
                 .collect(),
             lock_time: Some(transaction.lock_time),
-            subnetwork_id: Some(transaction.subnetwork_id.into()),
+            subnetwork_id: Some(transaction.subnetwork_id),
             gas: Some(transaction.gas),
             payload: Some(transaction.payload.clone()),
             storage_mass: Some(transaction.storage_mass()),
