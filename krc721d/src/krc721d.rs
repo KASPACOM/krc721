@@ -544,12 +544,20 @@ impl Server {
                         }
                         .into());
                     }
+                    let retained = processor.accepted_block_before(blue_score)?.ok_or(
+                        krc721_nexus::processor::Error::RewindWouldRemoveAllAcceptedBlocks {
+                            requested: blue_score,
+                        },
+                    )?;
 
                     println!();
                     intro("KRC721 database rewind")?;
                     log::warning(format!(
-                        "This removes and rebuilds derived state inclusively from blue score {blue_score}; current tip is {} ({})",
-                        last.blue_score, last.block_hash
+                        "This removes and rebuilds derived state inclusively from blue score {blue_score}; current tip is {} ({}), retained predecessor is {} ({})",
+                        last.blue_score,
+                        last.block_hash,
+                        retained.blue_score,
+                        retained.block_hash
                     ))?;
                     if dry_run {
                         outro("Dry run complete; database was not changed")?;

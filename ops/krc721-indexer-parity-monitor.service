@@ -1,0 +1,10 @@
+[Unit]
+Description=KRC721 prod indexer parity monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/krc721-indexer-parity-monitor.py --ops-window 100 --blue-lag-tolerance 360
+StandardOutput=append:/var/log/krc721-indexer-monitor/parity.jsonl
+StandardError=append:/var/log/krc721-indexer-monitor/parity.err

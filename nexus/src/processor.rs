@@ -164,6 +164,25 @@ impl Processor {
         Ok(self.db.chain_block_scores.last_accepted_block_rtx(&rtx)?)
     }
 
+    /// Returns the newest accepted block strictly below `blue_score`.
+    pub fn accepted_block_before(
+        &self,
+        blue_score: u64,
+    ) -> Result<Option<BlueScoredChainBlockHash>> {
+        let rtx = self.db.read_tx();
+        let upper_bound = BlueScoredChainBlockHash {
+            blue_score,
+            block_hash: RpcHash::default(),
+        };
+        self.db
+            .chain_block_scores
+            .range_rtx(&rtx, ..upper_bound)
+            .next_back()
+            .transpose()
+            .map(|entry| entry.map(|(block, ())| block))
+            .map_err(Into::into)
+    }
+
     /// Inclusively removes derived state at and above `blue_score` for canonical replay.
     pub fn rewind_from_blue_score(&self, blue_score: u64) -> Result<()> {
         let tip = self
@@ -2256,6 +2275,10 @@ mod tests {
             processor.rewind_from_blue_score(later_score + 1),
             Err(Error::RewindBeyondTip { .. })
         ));
+        assert!(processor
+            .accepted_block_before(later_score)
+            .unwrap()
+            .is_none());
         processor.rewind_from_blue_score(stale_score).unwrap();
 
         let rtx = db.read_tx();

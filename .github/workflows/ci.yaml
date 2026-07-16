@@ -43,6 +43,16 @@ jobs:
       - name: Run cargo clippy
         run: cargo clippy --workspace --all-targets --tests --benches -- -D warnings -A clippy::result_large_err -A clippy::items_after_test_module
 
+  monitor:
+    name: Parity monitor
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Run parity monitor tests
+        run: python3 -m unittest ops/test_krc721_indexer_parity_monitor.py
+
   test:
     name: Tests
     runs-on: ubuntu-latest

@@ -16,6 +16,8 @@ pub enum Error {
     NoAcceptedBlockForRewind,
     #[error("rewind blue score {requested} is beyond current tip {tip}")]
     RewindBeyondTip { requested: u64, tip: u64 },
+    #[error("rewind blue score {requested} would remove every retained accepted block")]
+    RewindWouldRemoveAllAcceptedBlocks { requested: u64 },
     #[error("blue score {0} is too large to convert to an operation score")]
     BlueScoreOverflow(u64),
     #[error("database write conflict while committing rewind")]

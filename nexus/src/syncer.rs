@@ -883,10 +883,21 @@ struct ReconstructedMergedBlockAcceptance {
 mod tests {
     use super::*;
     use kaspa_consensus_core::BlueWorkType;
-    use kaspa_rpc_core::{
-        RpcBlockVerboseData, RpcHeader, RpcOptionalHeader, RpcOptionalTransactionVerboseData,
+    use kaspa_consensus_core::{
+        subnets::SubnetworkId,
+        tx::{TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput},
     };
-    use krc721_core::{network::Network, runtime::Service};
+    use kaspa_rpc_core::{
+        RpcBlockVerboseData, RpcHeader, RpcOptionalHeader, RpcOptionalTransactionInput,
+        RpcOptionalTransactionInputVerboseData, RpcOptionalTransactionOutput,
+        RpcOptionalTransactionVerboseData, RpcOptionalUtxoEntry,
+    };
+    use krc721_core::{
+        inscriptions::redeem_script_hash_signature_script,
+        model::krc721::{Metadata, Op, Protocol, UserOperation},
+        network::Network,
+        runtime::Service,
+    };
     use krc721_database::database::Db;
     use std::sync::Mutex as StdMutex;
 
@@ -894,6 +905,7 @@ mod tests {
         previous: BlueScoredChainBlockHash,
         stale: BlueScoredChainBlockHash,
         replacement: BlueScoredChainBlockHash,
+        accepted_transactions: Vec<RpcOptionalTransaction>,
         calls: StdMutex<Vec<RpcHash>>,
     }
 
@@ -963,7 +975,7 @@ mod tests {
                         daa_score: Some(self.replacement.blue_score),
                         ..RpcOptionalHeader::default()
                     },
-                    accepted_transactions: vec![],
+                    accepted_transactions: self.accepted_transactions.clone(),
                 }],
             ))
         }
@@ -1004,6 +1016,81 @@ mod tests {
             storage_mass: None,
             verbose_data,
         }
+    }
+
+    fn deployment_transaction(
+        block_hash: RpcHash,
+    ) -> (RpcOptionalTransaction, Tick, TransactionId, Transaction) {
+        let tick = Tick::from_str("AUDITNFT").unwrap();
+        let deploy = UserOperation::try_new(Protocol::Krc721, Op::Deploy, tick.to_string())
+            .unwrap()
+            .with_metadata(Metadata::Remote("krc721://audit/".to_string()))
+            .with_daa_mint_start(0)
+            .with_max(1);
+        let inscription = redeem_script_hash_signature_script(
+            PROTOCOL_KSPR_NAMESPACE.as_bytes(),
+            serde_json::to_string(&deploy).unwrap().as_bytes(),
+            &[231u8; 32],
+            &[243u8; 32],
+        )
+        .unwrap();
+        let transaction = Transaction::new(
+            0,
+            vec![TransactionInput::new(
+                TransactionOutpoint::new(Default::default(), 0),
+                inscription,
+                0,
+                1,
+            )],
+            vec![TransactionOutput::new(
+                1_000,
+                ScriptPublicKey::new(0, vec![0u8; 32].into()),
+            )],
+            0,
+            SubnetworkId::default(),
+            0,
+            vec![],
+        );
+        let transaction_id = transaction.id();
+        let mut inputs = transaction
+            .inputs
+            .clone()
+            .into_iter()
+            .map(RpcOptionalTransactionInput::from)
+            .collect::<Vec<_>>();
+        inputs[0].verbose_data = Some(RpcOptionalTransactionInputVerboseData {
+            utxo_entry: Some(RpcOptionalUtxoEntry::new(
+                Some(100_000_001_000),
+                Some(ScriptPublicKey::new(0, vec![0u8; 32].into())),
+                Some(0),
+                Some(false),
+                None,
+                None,
+            )),
+        });
+        let rpc_transaction = RpcOptionalTransaction {
+            version: Some(transaction.version),
+            inputs,
+            outputs: transaction
+                .outputs
+                .clone()
+                .into_iter()
+                .map(RpcOptionalTransactionOutput::from)
+                .collect(),
+            lock_time: Some(transaction.lock_time),
+            subnetwork_id: Some(transaction.subnetwork_id.into()),
+            gas: Some(transaction.gas),
+            payload: Some(transaction.payload.clone()),
+            storage_mass: Some(transaction.storage_mass()),
+            verbose_data: Some(RpcOptionalTransactionVerboseData {
+                transaction_id: Some(transaction_id),
+                hash: Some(Default::default()),
+                compute_mass: Some(0),
+                block_hash: Some(block_hash),
+                block_time: Some(0),
+            }),
+        };
+        (rpc_transaction, tick, transaction_id, transaction)
     }
 
     fn acceptance_header(hash: Option<RpcHash>) -> RpcChainBlockAcceptedTransactions {
@@ -1117,6 +1204,9 @@ mod tests {
             blue_score: 100,
             block_hash: RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]),
         };
+        let origin = RpcHash::from_bytes([ORIGIN_HASH_BYTE; 32]);
+        let (deployment, deployment_tick, deployment_tx_id, deployment_core_tx) =
+            deployment_transaction(origin);
 
         {
             let mut wtx = db.write_tx();
@@ -1145,9 +1235,30 @@ mod tests {
             previous,
             stale: old_tip,
             replacement: new_sink,
+            accepted_transactions: vec![deployment],
             calls: StdMutex::new(vec![]),
         });
-        let analyzer = Analyzer::new(None, Default::default(), Prefix::Testnet, Arc::new([]), 0);
+        let analyzer = Analyzer::new(
+            None,
+            Default::default(),
+            Prefix::Testnet,
+            Arc::new([
+                "krc721".to_string(),
+                "kspr721".to_string(),
+                "ipfs".to_string(),
+            ]),
+            0,
+        );
+        let detected = analyzer
+            .detect_krc721(&ContextTransaction {
+                tx: deployment_core_tx,
+                fee: 100_000_000_000,
+                block_time: 0,
+                accepting_block_daa_score: new_sink.blue_score,
+                index_within_merged_block: 0,
+            })
+            .unwrap();
+        assert!(detected.is_some());
         let syncer = Syncer::new(
             Arc::new(State::default()),
             metrics,
@@ -1164,6 +1275,21 @@ mod tests {
             vec![old_tip.block_hash, previous.block_hash]
         );
         assert_eq!(processor.last_accepted_block().unwrap(), Some(new_sink));
+        let rtx = db.read_tx();
+        let deployment_op_score = db
+            .tx_id_to_opscore
+            .get_rtx(&rtx, &deployment_tx_id)
+            .unwrap();
+        let deployment_op = deployment_op_score
+            .and_then(|score| db.operation_history.get_rtx(&rtx, &score).unwrap());
+        assert!(
+            db.collection_registry
+                .get_rtx(&rtx, &deployment_tick)
+                .unwrap()
+                .is_some(),
+            "deployment_op={deployment_op:?}"
+        );
+        drop(rtx);
         assert!(syncer.is_synced());
 
         processor.clone().terminate();
@@ -1214,6 +1340,7 @@ mod tests {
             },
             stale: old_tip,
             replacement: new_sink,
+            accepted_transactions: vec![],
             calls: StdMutex::new(vec![]),
         });
         let analyzer = Analyzer::new(None, Default::default(), Prefix::Testnet, Arc::new([]), 0);
