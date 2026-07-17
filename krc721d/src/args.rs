@@ -22,6 +22,10 @@ pub enum Mode {
     Rewind {
         blue_score: u64,
     },
+    RepairTransfer {
+        source_data_dir: PathBuf,
+        txid: String,
+    },
     Purge,
 }
 
@@ -103,6 +107,36 @@ impl Args {
                     ])
                     .help("Rewind an explicitly selected recovery database inclusively from a blue score"),
             )
+            .arg(
+                Arg::new("repair-transfer-source-data-dir")
+                    .long("repair-transfer-source-data-dir")
+                    .value_name("path")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(PathBuf))
+                    .requires_all(["data-dir", "repair-transfer-txid", "yes"])
+                    .conflicts_with_all([
+                        "rewind-blue-score",
+                        "archive",
+                        "restore",
+                        "sync",
+                        "sync-reset",
+                        "purge",
+                        "cluster",
+                        "notifier",
+                        "http",
+                        "local",
+                        "daemon",
+                    ])
+                    .help("Read one missed transfer from a trusted recovery database"),
+            )
+            .arg(
+                Arg::new("repair-transfer-txid")
+                    .long("repair-transfer-txid")
+                    .value_name("txid")
+                    .num_args(1)
+                    .requires("repair-transfer-source-data-dir")
+                    .help("Transaction ID of the missed transfer to revalidate and apply"),
+            )
             .arg(arg!(--utxoindex "Enable UTXO index in the local Rusty Kaspa node"))
             .arg(
                 Arg::new("dry-run")
@@ -115,8 +149,8 @@ impl Args {
                 Arg::new("yes")
                     .long("yes")
                     .num_args(0)
-                    .requires("rewind-blue-score")
-                    .help("Confirm a rewind non-interactively after validation"),
+                    .requires_any(["rewind-blue-score", "repair-transfer-source-data-dir"])
+                    .help("Confirm a recovery mutation non-interactively after validation"),
             )
             .arg(
                 Arg::new("trace-sync")
@@ -284,6 +318,16 @@ impl Args {
         } else if let Some(blue_score) = matches.get_one::<u64>("rewind-blue-score") {
             Mode::Rewind {
                 blue_score: *blue_score,
+            }
+        } else if let Some(source_data_dir) =
+            matches.get_one::<PathBuf>("repair-transfer-source-data-dir")
+        {
+            Mode::RepairTransfer {
+                source_data_dir: source_data_dir.clone(),
+                txid: matches
+                    .get_one::<String>("repair-transfer-txid")
+                    .expect("required by clap")
+                    .clone(),
             }
         } else if is_purge {
             Mode::Purge

@@ -22,4 +22,19 @@ pub enum Error {
     BlueScoreOverflow(u64),
     #[error("database write conflict while committing rewind")]
     RewindWriteConflict,
+    #[error("repair source operation is not a transfer")]
+    RepairNotTransfer,
+    #[error("repair transaction {0} already exists in target database")]
+    RepairAlreadyExists(String),
+    #[error(
+        "repair operation score {repair_score} is not newer than token state score {current_score}"
+    )]
+    RepairWouldRewriteLaterState {
+        repair_score: u64,
+        current_score: u64,
+    },
+    #[error("repair transfer failed target-state validation: {0}")]
+    RepairValidation(String),
+    #[error("database write conflict while committing transfer repair")]
+    RepairWriteConflict,
 }

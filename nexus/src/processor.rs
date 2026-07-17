@@ -204,6 +204,68 @@ impl Processor {
         Ok(())
     }
 
+    /// Applies one historically missed transfer from a trusted source database.
+    ///
+    /// This deliberately supports transfers only: replaying a mint outside its
+    /// accepting mergeset would not have the entropy required to preserve the
+    /// canonical token ID. The target-state validation and score guard make the
+    /// repair fail closed if later ownership state already exists.
+    pub fn repair_missing_transfer(&self, source: ScoredCheckedOperation) -> Result<()> {
+        let ScoredCheckedOperation {
+            opscore,
+            checked_operation,
+        } = source;
+        let tx_id = checked_operation.operation.common.tx_id;
+        let (tick, token_id) = match &checked_operation.operation.info {
+            OperationInfo::Transfer(info) => {
+                (checked_operation.operation.common.tick, info.token_id)
+            }
+            _ => return Err(Error::RepairNotTransfer),
+        };
+
+        let mut tx = self.db.write_tx();
+        if self.db.tx_id_to_opscore.get_wtx(&mut tx, &tx_id)?.is_some() {
+            return Err(Error::RepairAlreadyExists(tx_id.to_string()));
+        }
+        if let Some(CurrentOwnershipValue { mod_tx_score, .. }) = self
+            .db
+            .current_ownership
+            .get_wtx(&mut tx, &OwnershipKey { tick, token_id })?
+        {
+            if mod_tx_score >= opscore {
+                return Err(Error::RepairWouldRewriteLaterState {
+                    repair_score: opscore,
+                    current_score: mod_tx_score,
+                });
+            }
+        }
+
+        let stats_diffs = self.process_nft_operations(
+            &mut tx,
+            [ContextOperation {
+                tx_score: opscore,
+                operation: checked_operation.operation,
+                // Transfers do not consume mergeset entropy.
+                mergeset_entropy: 0,
+            }],
+        )?;
+        let repaired = self
+            .db
+            .operation_history
+            .get_wtx(&mut tx, &opscore)?
+            .expect("the repair operation was inserted in this write transaction");
+        if let Some(error) = repaired.error {
+            return Err(Error::RepairValidation(format!("{error:?}")));
+        }
+
+        let stats = self.db.stats.addition(&mut tx, stats_diffs)?;
+        tx.commit()
+            .map_err(krc721_database::error::Error::Fjall)?
+            .map_err(|_| Error::RepairWriteConflict)?;
+        self.counters.update_from_stats(&stats);
+        Ok(())
+    }
+
     pub fn switch_to_queue_mod(&self) -> Result<(), SendError<RTNotification>> {
         self.realtime_sender.send(RTNotification::SwitchToQueue)
     }
@@ -1803,6 +1865,108 @@ mod tests {
 
     fn dummy_tx_id(byte: u8) -> TransactionId {
         TransactionId::from_bytes([byte; 32])
+    }
+
+    #[test]
+    fn repairs_one_missing_transfer_without_replaying_mints() {
+        let db_folder = temp_db_folder("repair_missing_transfer");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let token_id = 474;
+        let sender = dummy_pubkey_spk(0xAA);
+        let receiver = dummy_pubkey_spk(0xBB);
+        let mint_score = 100;
+        let transfer_score = 200;
+        let transfer_tx_id = dummy_tx_id(0xCC);
+
+        {
+            let mut wtx = db.write_tx();
+            db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipKey { tick, token_id },
+                    &CurrentOwnershipValue {
+                        owner: sender.clone(),
+                        mod_tx_score: mint_score,
+                    },
+                )
+                .unwrap();
+            db.ownership_history
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipHistoryKey::with_score(tick, token_id, mint_score),
+                    &sender,
+                )
+                .unwrap();
+            db.address_holdings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: sender.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &mint_score,
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        let source = || ScoredCheckedOperation {
+            opscore: transfer_score,
+            checked_operation: CheckedOperation {
+                operation: Operation {
+                    common: OperationCommon {
+                        tick,
+                        tx_id: transfer_tx_id,
+                        block_time: 0,
+                        sender: sender.clone(),
+                        fee: 292_900,
+                        accepting_block_daa_score: 0,
+                    },
+                    info: OperationInfo::Transfer(TransferInfo {
+                        token_id,
+                        to: receiver.clone(),
+                    }),
+                },
+                // A source replay may have rejected the operation because its
+                // token IDs were non-canonical. Target state is revalidated.
+                error: Some(CtxValidationError::TokenNotFound),
+            },
+        };
+
+        processor.repair_missing_transfer(source()).unwrap();
+
+        let rtx = db.read_tx();
+        let repaired = db
+            .operation_history
+            .get_rtx(&rtx, &transfer_score)
+            .unwrap()
+            .unwrap();
+        assert!(repaired.error.is_none());
+        assert_eq!(
+            db.tx_id_to_opscore.get_rtx(&rtx, &transfer_tx_id).unwrap(),
+            Some(transfer_score)
+        );
+        let ownership = db
+            .current_ownership
+            .get_rtx(&rtx, &OwnershipKey { tick, token_id })
+            .unwrap()
+            .unwrap();
+        assert_eq!(ownership.owner, receiver);
+        assert_eq!(ownership.mod_tx_score, transfer_score);
+        let stats = db.stats.load(&rtx).unwrap();
+        assert_eq!(stats.transfers, 1);
+        assert_eq!(stats.security_fees, 292_900);
+        drop(rtx);
+
+        assert!(matches!(
+            processor.repair_missing_transfer(source()),
+            Err(Error::RepairAlreadyExists(_))
+        ));
+        let _ = std::fs::remove_dir_all(&db_folder);
     }
 
     /// Regression test for the reorg-loses-listing bug.

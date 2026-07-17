@@ -580,6 +580,39 @@ impl Server {
                     ))?;
                     Ok(None)
                 }
+                Mode::RepairTransfer {
+                    source_data_dir,
+                    txid,
+                } => {
+                    use cliclack::*;
+                    use kaspa_consensus_core::tx::TransactionId;
+
+                    let txid = TransactionId::from_str(&txid)?;
+                    let source_folders = Folders::new(Some(source_data_dir));
+                    let source_db = Arc::new(Db::try_open(source_folders.data, &network)?);
+                    let source_view = nft_view::DbView::new(source_db);
+                    let source_operation =
+                        source_view.krc721_op_by_txid(txid)?.ok_or_else(|| {
+                            crate::error::Error::custom(format!(
+                                "repair transaction {txid} is missing from source database"
+                            ))
+                        })?;
+
+                    let target_db = Arc::new(Db::try_open(folders.data, &network)?);
+                    let metrics = Metrics::try_new(target_db.clone(), network)?;
+                    let counters = metrics.counters().clone();
+                    let processor = Processor::new(target_db, counters, None, None);
+
+                    println!();
+                    intro("KRC721 missing transfer repair")?;
+                    log::warning(format!(
+                        "Revalidating and applying transfer {txid} at operation score {} from the trusted source database",
+                        source_operation.opscore
+                    ))?;
+                    processor.repair_missing_transfer(source_operation)?;
+                    outro(format!("Transfer repair is complete: {txid}"))?;
+                    Ok(None)
+                }
                 Mode::SyncReset { server } => {
                     use cliclack::*;
 
