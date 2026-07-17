@@ -149,7 +149,6 @@ impl Args {
                 Arg::new("yes")
                     .long("yes")
                     .num_args(0)
-                    .requires_any(["rewind-blue-score", "repair-transfer-source-data-dir"])
                     .help("Confirm a recovery mutation non-interactively after validation"),
             )
             .arg(
