@@ -24,3 +24,38 @@ Run a non-alerting live check with:
 ```
 
 Peer parity cannot detect a future defect that both indexers reproduce identically. The known transaction and NFT probes cover the incidents recorded here, but a general common-mode guarantee requires a separately implemented chain-derived KRC721 verifier.
+
+## Finalized mint manifest
+
+After an isolated canonical replay has been verified, freeze its finalized
+mint transaction-to-token assignments in a manifest:
+
+```bash
+python3 ops/krc721-finalized-mint-audit.py generate \
+  --base=http://127.0.0.1:18800/api/v1/krc721/mainnet \
+  --min-op-score=<rebuild-boundary-op-score> \
+  --output=/var/lib/krc721-indexer-monitor/canonical-mints.jsonl
+```
+
+Verify both public indexers against that immutable baseline:
+
+```bash
+python3 ops/krc721-finalized-mint-audit.py verify \
+  --manifest=/var/lib/krc721-indexer-monitor/canonical-mints.jsonl \
+  --target=prod1=https://krc721-indexer.kaspa.com/api/v1/krc721/mainnet \
+  --target=prod2=https://krc721-indexer-2.kaspa.com/api/v1/krc721/mainnet
+```
+
+The command exits non-zero for missing, additional, or rewritten mint
+assignments. Generate the baseline only from the independently replayed
+canary, never from a production peer merely because both peers agree.
+
+Recovery commands must always point at a copied database explicitly:
+
+```bash
+krc721d --mainnet \
+  --data-dir=/root/krc721-rebuild-<timestamp>/.krc721 \
+  --rewind-blue-score=<score> --dry-run
+```
+
+Never run a production recovery rewind without `--data-dir`.

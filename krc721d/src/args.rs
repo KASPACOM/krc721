@@ -45,6 +45,7 @@ pub struct Args {
     pub yes: bool,
     pub get_genesis: bool,
     pub init_genesis: Option<String>,
+    pub data_dir: Option<PathBuf>,
     pub retention_period_days: Option<u32>,
     pub daa_ecdsa_fix: Option<u64>,
 }
@@ -72,6 +73,14 @@ impl Args {
             .arg(arg!(--remote "Connect to a remote Kaspa node address (integrated)"))
             .arg(arg!(--daemon "Spawn as Rusty Kaspa p2p daemon").hide(true))
             .arg(arg!(--local "Spawn Rusty Kaspa p2p node daemon as a child process"))
+            .arg(
+                Arg::new("data-dir")
+                    .long("data-dir")
+                    .value_name("path")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(PathBuf))
+                    .help("Override the KRC721 data root for isolated recovery copies"),
+            )
             .arg(arg!(--purge "Erase indexer database (use with caution)"))
             .arg(
                 Arg::new("rewind-blue-score")
@@ -79,6 +88,7 @@ impl Args {
                     .value_name("blue-score")
                     .num_args(1)
                     .value_parser(clap::value_parser!(u64))
+                    .requires("data-dir")
                     .conflicts_with_all([
                         "archive",
                         "restore",
@@ -91,7 +101,7 @@ impl Args {
                         "local",
                         "daemon",
                     ])
-                    .help("Rewind derived indexer state inclusively from a blue score so it can be replayed"),
+                    .help("Rewind an explicitly selected recovery database inclusively from a blue score"),
             )
             .arg(arg!(--utxoindex "Enable UTXO index in the local Rusty Kaspa node"))
             .arg(
@@ -316,6 +326,7 @@ impl Args {
         let init_genesis = matches.get_one::<String>("init-genesis").cloned();
 
         let get_genesis = matches.get_flag("get-genesis");
+        let data_dir = matches.get_one::<PathBuf>("data-dir").cloned();
 
         if let Some(node_url) = &node_rpc {
             if remote {
@@ -354,6 +365,7 @@ impl Args {
             yes,
             get_genesis,
             init_genesis,
+            data_dir,
             retention_period_days,
             daa_ecdsa_fix,
         }

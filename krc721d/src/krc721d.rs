@@ -126,6 +126,7 @@ impl Server {
                 yes,
                 init_genesis,
                 get_genesis,
+                data_dir,
                 retention_period_days,
                 daa_ecdsa_fix,
             } = Args::parse();
@@ -141,7 +142,7 @@ impl Server {
                 indexer_config.daa_ecdsa_fix = daa_ecdsa_fix
             }
 
-            let folders = Folders::default();
+            let folders = Folders::new(data_dir);
 
             if log_level == LevelFilter::TRACE {
                 workflow_log::set_log_level(workflow_log::LevelFilter::Trace);

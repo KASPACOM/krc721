@@ -999,42 +999,53 @@ impl Processor {
             warn!("Affected keys: {:?}", affected_keys);
         }
 
-        // Now process each key with a new borrow of tx
-        affected_keys
-            .into_iter()
-            .rev()
-            .map(|k| {
-                let holder = self.db.ownership_history.remove_if_exists_wtx(
-                    tx,
-                    &OwnershipHistoryKey::with_score(k.tick, k.token_id, k.score),
-                )?;
-                self.db.ownership_changes.remove_wtx(tx, &k)?;
-                if (self.db.mint_history.remove_if_exists_wtx(
-                    tx,
-                    &MintHistoryKey::new(k.tick, k.reversed_seq_number, k.token_id, k.score),
-                )?)
-                .is_some()
-                {
-                    let premint_data = {
-                        if let Some(premint_data) = premint_from_removed.get(&k.tick) {
-                            premint_data
-                        } else {
-                            &self
-                                .db
-                                .collection_registry
-                                .get_wtx(tx, &k.tick)?
-                                .map(|d| d.info.info.premint)
-                                .expect("Fallback should not fail")
-                        }
-                    };
-                    if k.token_id > *premint_data {
-                        self.rollback_token_generation(tx, &k.tick, k.token_id)
-                            .expect("Rollback should never fail");
-                    }
-                }
-                Ok((k, holder))
-            })
-            .collect()
+        let mut affected_tokens = Vec::with_capacity(affected_keys.len());
+        let mut minted_tokens = Vec::new();
+
+        // Ownership history can be removed in reverse operation order, but token range
+        // generation has a stricter invariant: mints for each collection must be undone
+        // in descending mint-sequence order. TokenMintsKey is ordered by score and then
+        // token id, so simply reversing the partition scan is not sufficient when more
+        // than one mint for a collection shares an accepting score.
+        for k in affected_keys.into_iter().rev() {
+            let holder = self.db.ownership_history.remove_if_exists_wtx(
+                tx,
+                &OwnershipHistoryKey::with_score(k.tick, k.token_id, k.score),
+            )?;
+            self.db.ownership_changes.remove_wtx(tx, &k)?;
+            if (self.db.mint_history.remove_if_exists_wtx(
+                tx,
+                &MintHistoryKey::new(k.tick, k.reversed_seq_number, k.token_id, k.score),
+            )?)
+            .is_some()
+            {
+                minted_tokens.push((k.tick, u64::MAX - k.reversed_seq_number, k.token_id));
+            }
+            affected_tokens.push((k, holder));
+        }
+
+        minted_tokens.sort_unstable_by(|(left_tick, left_seq, _), (right_tick, right_seq, _)| {
+            left_tick
+                .cmp(right_tick)
+                .then_with(|| right_seq.cmp(left_seq))
+        });
+        for (tick, _seq, token_id) in minted_tokens {
+            let premint = if let Some(premint) = premint_from_removed.get(&tick) {
+                *premint
+            } else {
+                self.db
+                    .collection_registry
+                    .get_wtx(tx, &tick)?
+                    .map(|d| d.info.info.premint)
+                    .expect("collection must exist when rolling back a retained deployment")
+            };
+            if token_id > premint {
+                self.rollback_token_generation(tx, &tick, token_id)
+                    .expect("token generation rollback must follow reverse mint sequence");
+            }
+        }
+
+        Ok(affected_tokens)
     }
 
     /// Remove current ownership records for the given tokens.
@@ -1766,6 +1777,7 @@ mod tests {
     use kaspa_consensus_core::tx::{ScriptPublicKey, ScriptVec, TransactionId};
     use kaspa_txscript::pay_to_script_hash_script;
     use krc721_core::network::Network;
+    use krc721_database::database::TokenMetaKey;
     use std::str::FromStr;
 
     fn temp_db_folder(name: &str) -> std::path::PathBuf {
@@ -2300,6 +2312,104 @@ mod tests {
             .is_none());
 
         drop(rtx);
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn same_score_mints_rollback_in_reverse_sequence_and_replay_identically() {
+        let db_folder = temp_db_folder("same_score_mint_sequence_rollback");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+        let tick = Tick::from_str("REPLAYNFT").unwrap();
+        let owner = dummy_pubkey_spk(0xAB);
+        let score = calculate_tx_score_from_blue(1_000);
+        let entropy = 4;
+        let max_supply = NonZeroU64::new(10).unwrap();
+        let mut original_token_ids = Vec::new();
+
+        {
+            let mut wtx = db.write_tx();
+            for seq in 1..=3 {
+                let token_id = processor
+                    .generate_token_id(&mut wtx, &tick, entropy, max_supply, 0)
+                    .unwrap()
+                    .get();
+                original_token_ids.push(token_id);
+                db.mint_history
+                    .insert_wtx(
+                        &mut wtx,
+                        MintHistoryKey::with_seq(tick, seq, token_id, score),
+                        &(),
+                    )
+                    .unwrap();
+                db.ownership_changes
+                    .insert_wtx(
+                        &mut wtx,
+                        TokenMintsKey::with_seq(score, tick, token_id, seq),
+                        &(),
+                    )
+                    .unwrap();
+                db.ownership_history
+                    .insert_wtx(
+                        &mut wtx,
+                        OwnershipHistoryKey::with_score(tick, token_id, score),
+                        &owner,
+                    )
+                    .unwrap();
+            }
+            wtx.commit().unwrap().expect("seed commit");
+        }
+        assert_eq!(original_token_ids, vec![5, 1, 3]);
+
+        {
+            let mut wtx = db.write_tx();
+            let affected = processor
+                .get_affected_token_operations(&mut wtx, score, AHashMap::from_iter([(tick, 0)]))
+                .unwrap();
+            assert_eq!(affected.len(), original_token_ids.len());
+            wtx.commit().unwrap().expect("rollback commit");
+        }
+
+        {
+            let rtx = db.read_tx();
+            assert!(db.range_lengths.get_rtx(&rtx, &tick).unwrap().is_none());
+            assert!(db
+                .mint_history
+                .last_minted_token_seq_no_rtx(&rtx, &tick)
+                .unwrap()
+                .is_none());
+            for token_id in &original_token_ids {
+                assert!(db
+                    .token_id_meta
+                    .get_rtx(
+                        &rtx,
+                        &TokenMetaKey {
+                            tick,
+                            token_id: *token_id,
+                        },
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+        }
+
+        let replayed_token_ids = {
+            let mut wtx = db.write_tx();
+            let token_ids = (0..original_token_ids.len())
+                .map(|_| {
+                    processor
+                        .generate_token_id(&mut wtx, &tick, entropy, max_supply, 0)
+                        .unwrap()
+                        .get()
+                })
+                .collect::<Vec<_>>();
+            wtx.commit().unwrap().expect("replay commit");
+            token_ids
+        };
+        assert_eq!(replayed_token_ids, original_token_ids);
+
+        drop(db);
         let _ = std::fs::remove_dir_all(&db_folder);
     }
 

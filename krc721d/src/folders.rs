@@ -12,8 +12,14 @@ pub struct Folders {
 
 impl Default for Folders {
     fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+impl Folders {
+    pub fn new(data: Option<PathBuf>) -> Self {
         let home = home_dir().unwrap();
-        let data = home.join(".krc721");
+        let data = data.unwrap_or_else(|| home.join(".krc721"));
         let logs = data.join("logs");
         let kaspa = data.join("kaspa");
         let snapshots = data.join("snapshots");

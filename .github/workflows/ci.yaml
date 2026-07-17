@@ -51,7 +51,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run parity monitor tests
-        run: python3 -m unittest ops/test_krc721_indexer_parity_monitor.py
+        run: python3 -m unittest discover -s ops -p 'test_*.py'
 
   test:
     name: Tests
