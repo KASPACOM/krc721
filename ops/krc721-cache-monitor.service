@@ -1,0 +1,12 @@
+[Unit]
+Description=KRC721 dev/prod cache health monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/krc721-cache-monitor.py
+StateDirectory=krc721-cache-monitor
+LogsDirectory=krc721-cache-monitor
+StandardOutput=append:/var/log/krc721-cache-monitor/health.jsonl
+StandardError=append:/var/log/krc721-cache-monitor/health.err

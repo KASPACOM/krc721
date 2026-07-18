@@ -1,0 +1,13 @@
+[Unit]
+Description=KRC721 prod indexer parity monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/krc721-indexer-parity-monitor.env
+ExecStart=/usr/local/bin/krc721-indexer-parity-monitor.py --ops-window 100 --blue-lag-tolerance 360 --expected-commit ${EXPECTED_COMMIT} --expected-binary-sha256 ${EXPECTED_BINARY_SHA256}
+StateDirectory=krc721-indexer-monitor
+LogsDirectory=krc721-indexer-monitor
+StandardOutput=append:/var/log/krc721-indexer-monitor/parity.jsonl
+StandardError=append:/var/log/krc721-indexer-monitor/parity.err

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run KRC721 prod indexer parity monitor every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=30s
+Persistent=true
+Unit=krc721-indexer-parity-monitor.service
+
+[Install]
+WantedBy=timers.target

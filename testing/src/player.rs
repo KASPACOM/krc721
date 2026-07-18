@@ -75,6 +75,12 @@ impl BridgeT for Player {
         })
     }
 
+    async fn get_pruning_point(&self) -> NexusResult<BlueScoredChainBlockHash> {
+        Err(krc721_nexus::error::Error::custom(
+            "player bridge does not provide a pruning point",
+        ))
+    }
+
     async fn get_block(
         &self,
         _hash: RpcHash,

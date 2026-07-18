@@ -108,11 +108,12 @@ impl Syncer {
         };
 
         loop {
-            let from = self
-                .last_known_block
-                .lock()
-                .unwrap()
-                .expect("last known block is not set");
+            let Some(from) = *self.last_known_block.lock().unwrap() else {
+                warn!(
+                    "historical sync has no last known block; waiting for reconnect initialization"
+                );
+                return;
+            };
             info!("Syncing from block: {:?}", from);
 
             if is_same_sync_point(from, sink) {
@@ -132,7 +133,7 @@ impl Syncer {
             }
 
             let Ok(GetVirtualChainFromBlockV2Response {
-                mut removed_chain_block_hashes,
+                removed_chain_block_hashes,
                 added_chain_block_hashes,
                 chain_block_accepted_transactions,
             }) = self
@@ -145,19 +146,61 @@ impl Syncer {
                 continue;
             };
 
-            let mut forced_rollback_blue_score = None;
-            if from.blue_score >= sink.blue_score
-                && from.block_hash != sink.block_hash
-                && !removed_chain_block_hashes.contains(&from.block_hash)
-            {
+            if stale_sync_point_requires_rewind(from, sink, &removed_chain_block_hashes) {
                 warn!(
-                    "historical response did not remove stale sync point {}; forcing rollback from score {}",
+                    "historical response did not remove stale sync point {}; rewinding score {} before replay",
                     from.block_hash, from.blue_score
                 );
-                let mut removed = (*removed_chain_block_hashes).clone();
-                removed.push(from.block_hash);
-                removed_chain_block_hashes = Arc::new(removed);
-                forced_rollback_blue_score = Some(from.blue_score);
+                let mut rewind_blocks = (*removed_chain_block_hashes).clone();
+                rewind_blocks.push(from.block_hash);
+                let rewind = VirtualChainChanges {
+                    removed_chain_block_hashes: Arc::new(rewind_blocks),
+                    forced_rollback_blue_score: Some(from.blue_score),
+                    mergesets: vec![],
+                };
+                if let Err(err) = self
+                    .processor
+                    .send_historical_virtual_chain_changed_notification_and_wait(rewind)
+                {
+                    error!("Failed to rewind stale sync point before replay: {:?}", err);
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    continue;
+                }
+
+                match self.processor.last_accepted_block() {
+                    Ok(Some(block)) => {
+                        *self.last_known_block.lock().unwrap() = Some(block);
+                        sink = self.refresh_sync_target_or(sink).await;
+                        *self.target.lock().unwrap() = Some(sink);
+                    }
+                    Ok(None) => {
+                        warn!(
+                            "No accepted chain block remains after stale sync point rewind; reinitializing from the node pruning point"
+                        );
+                        let pruning_point = loop {
+                            match self.bridge.get_pruning_point().await {
+                                Ok(block) => break block,
+                                Err(err) => {
+                                    error!("Failed to resolve pruning point after rewind: {err}");
+                                    if self.shutting_down.load(Ordering::SeqCst) {
+                                        return;
+                                    }
+                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                }
+                            }
+                        };
+                        *self.last_known_block.lock().unwrap() = Some(pruning_point);
+                        sink = self.refresh_sync_target_or(sink).await;
+                        *self.target.lock().unwrap() = Some(sink);
+                    }
+                    Err(err) => {
+                        error!(
+                            "Failed to read last accepted block after stale sync point rewind: {err}"
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+                continue;
             }
 
             if let Err(err) = validate_historical_acceptance_coverage(
@@ -215,7 +258,7 @@ impl Syncer {
             let notification = VirtualChainChanges {
                 // who cares about that arc?? no one
                 removed_chain_block_hashes,
-                forced_rollback_blue_score,
+                forced_rollback_blue_score: None,
                 mergesets,
             };
 
@@ -386,7 +429,8 @@ impl Syncer {
 
     fn release_sync_task(self: &Arc<Self>) {
         self.sync_task_running.store(false, Ordering::SeqCst);
-        if !self.shutting_down.load(Ordering::SeqCst) && !self.is_synced() {
+        let has_replay_point = self.last_known_block.lock().unwrap().is_some();
+        if !self.shutting_down.load(Ordering::SeqCst) && !self.is_synced() && has_replay_point {
             self.spawn_sync_task_impl();
         }
     }
@@ -409,6 +453,16 @@ fn try_claim_sync_task_flag(sync_task_running: &AtomicBool) -> bool {
 
 fn is_same_sync_point(from: BlueScoredChainBlockHash, sink: BlueScoredChainBlockHash) -> bool {
     from == sink
+}
+
+fn stale_sync_point_requires_rewind(
+    from: BlueScoredChainBlockHash,
+    sink: BlueScoredChainBlockHash,
+    removed_chain_block_hashes: &[RpcHash],
+) -> bool {
+    from.blue_score >= sink.blue_score
+        && from.block_hash != sink.block_hash
+        && !removed_chain_block_hashes.contains(&from.block_hash)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -828,7 +882,117 @@ struct ReconstructedMergedBlockAcceptance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kaspa_rpc_core::{RpcOptionalHeader, RpcOptionalTransactionVerboseData};
+    use kaspa_consensus_core::BlueWorkType;
+    use kaspa_consensus_core::{
+        subnets::SubnetworkId,
+        tx::{TransactionId, TransactionInput, TransactionOutpoint, TransactionOutput},
+    };
+    use kaspa_rpc_core::{
+        RpcBlockVerboseData, RpcHeader, RpcOptionalHeader, RpcOptionalTransactionInput,
+        RpcOptionalTransactionInputVerboseData, RpcOptionalTransactionOutput,
+        RpcOptionalTransactionVerboseData, RpcOptionalUtxoEntry,
+    };
+    use krc721_core::{
+        inscriptions::redeem_script_hash_signature_script,
+        model::krc721::{Metadata, Op, Protocol, UserOperation},
+        network::Network,
+        runtime::Service,
+    };
+    use krc721_database::database::Db;
+    use std::sync::Mutex as StdMutex;
+
+    struct SameScoreReplayBridge {
+        previous: BlueScoredChainBlockHash,
+        stale: BlueScoredChainBlockHash,
+        replacement: BlueScoredChainBlockHash,
+        accepted_transactions: Vec<RpcOptionalTransaction>,
+        calls: StdMutex<Vec<RpcHash>>,
+    }
+
+    impl SameScoreReplayBridge {
+        fn response(
+            added: Vec<RpcHash>,
+            acceptance: Vec<RpcChainBlockAcceptedTransactions>,
+        ) -> GetVirtualChainFromBlockV2Response {
+            GetVirtualChainFromBlockV2Response {
+                removed_chain_block_hashes: Arc::new(vec![]),
+                added_chain_block_hashes: Arc::new(added),
+                chain_block_accepted_transactions: Arc::new(acceptance),
+            }
+        }
+
+        fn block(&self, block: BlueScoredChainBlockHash) -> RpcBlock {
+            RpcBlock {
+                header: RpcHeader {
+                    hash: block.block_hash,
+                    version: 0,
+                    parents_by_level: vec![],
+                    hash_merkle_root: Default::default(),
+                    accepted_id_merkle_root: Default::default(),
+                    utxo_commitment: Default::default(),
+                    timestamp: block.blue_score,
+                    bits: 0,
+                    nonce: 0,
+                    daa_score: block.blue_score,
+                    blue_work: BlueWorkType::default(),
+                    blue_score: block.blue_score,
+                    pruning_point: Default::default(),
+                },
+                transactions: vec![],
+                verbose_data: Some(RpcBlockVerboseData {
+                    hash: block.block_hash,
+                    difficulty: 0.0,
+                    selected_parent_hash: RpcHash::from_bytes([ORIGIN_HASH_BYTE; 32]),
+                    transaction_ids: vec![],
+                    is_header_only: false,
+                    blue_score: block.blue_score,
+                    children_hashes: vec![],
+                    merge_set_blues_hashes: vec![],
+                    merge_set_reds_hashes: vec![],
+                    is_chain_block: true,
+                }),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl BridgeT for SameScoreReplayBridge {
+        async fn get_historical_data(
+            &self,
+            from: RpcHash,
+        ) -> Result<GetVirtualChainFromBlockV2Response> {
+            self.calls.lock().unwrap().push(from);
+            if from == self.stale.block_hash {
+                return Ok(Self::response(vec![], vec![]));
+            }
+            assert_eq!(from, self.previous.block_hash);
+            Ok(Self::response(
+                vec![self.replacement.block_hash],
+                vec![RpcChainBlockAcceptedTransactions {
+                    chain_block_header: RpcOptionalHeader {
+                        hash: Some(self.replacement.block_hash),
+                        blue_score: Some(self.replacement.blue_score),
+                        daa_score: Some(self.replacement.blue_score),
+                        ..RpcOptionalHeader::default()
+                    },
+                    accepted_transactions: self.accepted_transactions.clone(),
+                }],
+            ))
+        }
+
+        async fn get_block(&self, hash: RpcHash, _include_transactions: bool) -> Result<RpcBlock> {
+            assert_eq!(hash, self.replacement.block_hash);
+            Ok(self.block(self.replacement))
+        }
+
+        async fn get_sink(&self) -> Result<BlueScoredChainBlockHash> {
+            Ok(self.replacement)
+        }
+
+        async fn get_pruning_point(&self) -> Result<BlueScoredChainBlockHash> {
+            Ok(self.previous)
+        }
+    }
 
     fn entropy(hashes: &[RpcHash]) -> u64 {
         let mut builder = MergesetEntropyBuilder::default();
@@ -852,6 +1016,81 @@ mod tests {
             storage_mass: None,
             verbose_data,
         }
+    }
+
+    fn deployment_transaction(
+        block_hash: RpcHash,
+    ) -> (RpcOptionalTransaction, Tick, TransactionId, Transaction) {
+        let tick = Tick::from_str("AUDITNFT").unwrap();
+        let deploy = UserOperation::try_new(Protocol::Krc721, Op::Deploy, tick.to_string())
+            .unwrap()
+            .with_metadata(Metadata::Remote("krc721://audit/".to_string()))
+            .with_daa_mint_start(0)
+            .with_max(1);
+        let inscription = redeem_script_hash_signature_script(
+            PROTOCOL_KSPR_NAMESPACE.as_bytes(),
+            serde_json::to_string(&deploy).unwrap().as_bytes(),
+            &[231u8; 32],
+            &[243u8; 32],
+        )
+        .unwrap();
+        let transaction = Transaction::new(
+            0,
+            vec![TransactionInput::new(
+                TransactionOutpoint::new(Default::default(), 0),
+                inscription,
+                0,
+                1,
+            )],
+            vec![TransactionOutput::new(
+                1_000,
+                ScriptPublicKey::new(0, vec![0u8; 32].into()),
+            )],
+            0,
+            SubnetworkId::default(),
+            0,
+            vec![],
+        );
+        let transaction_id = transaction.id();
+        let mut inputs = transaction
+            .inputs
+            .clone()
+            .into_iter()
+            .map(RpcOptionalTransactionInput::from)
+            .collect::<Vec<_>>();
+        inputs[0].verbose_data = Some(RpcOptionalTransactionInputVerboseData {
+            utxo_entry: Some(RpcOptionalUtxoEntry::new(
+                Some(100_000_001_000),
+                Some(ScriptPublicKey::new(0, vec![0u8; 32].into())),
+                Some(0),
+                Some(false),
+                None,
+                None,
+            )),
+        });
+        let rpc_transaction = RpcOptionalTransaction {
+            version: Some(transaction.version),
+            inputs,
+            outputs: transaction
+                .outputs
+                .clone()
+                .into_iter()
+                .map(RpcOptionalTransactionOutput::from)
+                .collect(),
+            lock_time: Some(transaction.lock_time),
+            subnetwork_id: Some(transaction.subnetwork_id),
+            gas: Some(transaction.gas),
+            payload: Some(transaction.payload.clone()),
+            storage_mass: Some(transaction.storage_mass()),
+            verbose_data: Some(RpcOptionalTransactionVerboseData {
+                transaction_id: Some(transaction_id),
+                hash: Some(Default::default()),
+                compute_mass: Some(0),
+                block_hash: Some(block_hash),
+                block_time: Some(0),
+            }),
+        };
+        (rpc_transaction, tick, transaction_id, transaction)
     }
 
     fn acceptance_header(hash: Option<RpcHash>) -> RpcChainBlockAcceptedTransactions {
@@ -945,6 +1184,188 @@ mod tests {
         assert!(!is_same_sync_point(old_tip, new_sink_same_score));
         assert!(!is_same_sync_point(old_tip, new_sink_lower_score));
         assert!(is_same_sync_point(old_tip, old_tip));
+    }
+
+    #[tokio::test]
+    async fn stale_same_score_tip_is_rewound_then_refetched_from_predecessor() {
+        let db_folder =
+            std::env::temp_dir().join(format!("krc721-syncer-same-score-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&db_folder);
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let old_tip = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]),
+        };
+        let previous = BlueScoredChainBlockHash {
+            blue_score: 99,
+            block_hash: RpcHash::from_le_u64([0x01, 0x02, 0x03, 0x04]),
+        };
+        let new_sink = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]),
+        };
+        let origin = RpcHash::from_bytes([ORIGIN_HASH_BYTE; 32]);
+        let (deployment, deployment_tick, deployment_tx_id, deployment_core_tx) =
+            deployment_transaction(origin);
+
+        {
+            let mut wtx = db.write_tx();
+            for block in [previous, old_tip] {
+                db.chain_block_scores
+                    .insert_wtx(&mut wtx, block, &())
+                    .unwrap();
+                db.blockhash_to_score
+                    .insert_wtx(&mut wtx, block.block_hash, &block.blue_score)
+                    .unwrap();
+            }
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        let metrics = Arc::new(Metrics::try_new(db.clone(), Network::Testnet10).unwrap());
+        let processor = Arc::new(Processor::new(
+            db.clone(),
+            metrics.counters.clone(),
+            None,
+            None,
+        ));
+        Service::spawn(processor.clone(), Runtime::default())
+            .await
+            .unwrap();
+        let bridge = Arc::new(SameScoreReplayBridge {
+            previous,
+            stale: old_tip,
+            replacement: new_sink,
+            accepted_transactions: vec![deployment],
+            calls: StdMutex::new(vec![]),
+        });
+        let analyzer = Analyzer::new(
+            None,
+            Default::default(),
+            Prefix::Testnet,
+            Arc::new([
+                "krc721".to_string(),
+                "kspr721".to_string(),
+                "ipfs".to_string(),
+            ]),
+            0,
+        );
+        let detected = analyzer
+            .detect_krc721(&ContextTransaction {
+                tx: deployment_core_tx,
+                fee: 100_000_000_000,
+                block_time: 0,
+                accepting_block_daa_score: new_sink.blue_score,
+                index_within_merged_block: 0,
+            })
+            .unwrap();
+        assert!(detected.is_some());
+        let syncer = Syncer::new(
+            Arc::new(State::default()),
+            metrics,
+            bridge.clone(),
+            processor.clone(),
+            analyzer,
+        );
+        *syncer.last_known_block.lock().unwrap() = Some(old_tip);
+
+        syncer.sync_task().await;
+
+        assert_eq!(
+            *bridge.calls.lock().unwrap(),
+            vec![old_tip.block_hash, previous.block_hash]
+        );
+        assert_eq!(processor.last_accepted_block().unwrap(), Some(new_sink));
+        let rtx = db.read_tx();
+        let deployment_op_score = db
+            .tx_id_to_opscore
+            .get_rtx(&rtx, &deployment_tx_id)
+            .unwrap();
+        let deployment_op = deployment_op_score
+            .and_then(|score| db.operation_history.get_rtx(&rtx, &score).unwrap());
+        assert!(
+            db.collection_registry
+                .get_rtx(&rtx, &deployment_tick)
+                .unwrap()
+                .is_some(),
+            "deployment_op={deployment_op:?}"
+        );
+        drop(rtx);
+        assert!(syncer.is_synced());
+
+        processor.clone().terminate();
+        processor.join().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(db_folder);
+    }
+
+    #[tokio::test]
+    async fn empty_tip_after_stale_rewind_recovers_from_pruning_point() {
+        let db_folder =
+            std::env::temp_dir().join(format!("krc721-syncer-empty-rewind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&db_folder);
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let old_tip = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x11, 0x12, 0x13, 0x14]),
+        };
+        let new_sink = BlueScoredChainBlockHash {
+            blue_score: 100,
+            block_hash: RpcHash::from_le_u64([0x21, 0x22, 0x23, 0x24]),
+        };
+        {
+            let mut wtx = db.write_tx();
+            db.chain_block_scores
+                .insert_wtx(&mut wtx, old_tip, &())
+                .unwrap();
+            db.blockhash_to_score
+                .insert_wtx(&mut wtx, old_tip.block_hash, &old_tip.blue_score)
+                .unwrap();
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        let metrics = Arc::new(Metrics::try_new(db.clone(), Network::Testnet10).unwrap());
+        let processor = Arc::new(Processor::new(
+            db.clone(),
+            metrics.counters.clone(),
+            None,
+            None,
+        ));
+        Service::spawn(processor.clone(), Runtime::default())
+            .await
+            .unwrap();
+        let bridge = Arc::new(SameScoreReplayBridge {
+            previous: BlueScoredChainBlockHash {
+                blue_score: 99,
+                block_hash: RpcHash::from_le_u64([0x01, 0x02, 0x03, 0x04]),
+            },
+            stale: old_tip,
+            replacement: new_sink,
+            accepted_transactions: vec![],
+            calls: StdMutex::new(vec![]),
+        });
+        let analyzer = Analyzer::new(None, Default::default(), Prefix::Testnet, Arc::new([]), 0);
+        let syncer = Arc::new(Syncer::new(
+            Arc::new(State::default()),
+            metrics,
+            bridge.clone(),
+            processor.clone(),
+            analyzer,
+        ));
+        *syncer.last_known_block.lock().unwrap() = Some(old_tip);
+
+        syncer.sync_task().await;
+        assert_eq!(
+            *bridge.calls.lock().unwrap(),
+            vec![old_tip.block_hash, bridge.previous.block_hash]
+        );
+        assert_eq!(processor.last_accepted_block().unwrap(), Some(new_sink));
+        assert_eq!(syncer.last_known_block(), Some(new_sink));
+        assert!(syncer.is_synced());
+
+        processor.clone().terminate();
+        processor.join().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(db_folder);
     }
 
     #[test]
