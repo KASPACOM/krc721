@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -26,8 +27,6 @@ HOSTS = {
         "ssh": "krc721-mainnet",
         "label": "prod1-pr11",
         "service": "krc721-pr11-prod1.service",
-        "commit_dir": "/home/krc721-pr11-prod1/repo",
-        "version_cmd": "/home/krc721-pr11-prod1/repo/target/release/krc721d --version",
         "node_service": "kaspa-mainnet-node-pr11.service",
         "expected_node_binary": "/home/krc721-pr11-prod1/repo/target/release/krc721d",
         "expected_node_rpc": "ws://127.0.0.1:17110",
@@ -36,8 +35,6 @@ HOSTS = {
     "prod2": {
         "ssh": "krc721-mainnet-2",
         "service": "krc721.service",
-        "commit_dir": "/home/krc721-pr11-canary/repo",
-        "version_cmd": "/home/krc721-pr11-canary/repo/target/release/krc721d --version",
         "node_service": "kaspa-mainnet-node.service",
         "expected_node_binary": "/home/krc721-pr11-canary/repo/target/release/krc721d",
         "proxy_service": "krc721-prod2-node-prod1-proxy.service",
@@ -107,6 +104,10 @@ KNOWN_TXS = {
 STATE_PATH = Path("/var/lib/krc721-indexer-monitor/state.json")
 DEFAULT_ALERT_CHAT_ID = "2090199766"
 ENV_PATHS = ["/root/.openclaw/.env", "/root/.hermes/.env"]
+DEGRADED_ALERT_RUNS = 5
+CRITICAL_ALERT_RUNS = 2
+RECOVERY_RUNS = 2
+REPEAT_ALERT_SECONDS = 3 * 60 * 60
 
 
 def utc_now():
@@ -127,17 +128,29 @@ def load_env_file(path):
         pass
 
 
-def fetch_json(url, timeout=25):
+def fetch_json(url, timeout=8):
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
 
 
+def retry_call(call, attempts=3, delays=(1, 2)):
+    errors = []
+    for attempt in range(1, attempts + 1):
+        try:
+            return {"ok": True, "value": call(), "attempts": attempt}
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+            if attempt < attempts:
+                time.sleep(delays[min(attempt - 1, len(delays) - 1)])
+    return {"ok": False, "error": errors[-1], "errors": errors, "attempts": attempts}
+
+
 def safe_fetch_json(url):
-    try:
-        return {"ok": True, "data": fetch_json(url)}
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    result = retry_call(lambda: fetch_json(url))
+    if result["ok"]:
+        return {"ok": True, "data": result["value"], "attempts": result["attempts"]}
+    return result
 
 
 def result_or_none(payload):
@@ -162,6 +175,10 @@ def fetch_ops(base, n):
     return out[:n]
 
 
+def safe_fetch_ops(base, n):
+    return retry_call(lambda: fetch_ops(base, n))
+
+
 def op_by_tx(base, txid):
     payload = safe_fetch_json(f"{base}/ops/txid/{txid}")
     return result_or_none(payload), payload
@@ -180,36 +197,46 @@ def op_sig(op):
     )
 
 
-def run_ssh(host, command, timeout=20):
-    try:
+def run_ssh(host, command, timeout=8):
+    def invoke():
         proc = subprocess.run(
-            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, command],
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, command],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
             check=False,
         )
-        return {
-            "ok": proc.returncode == 0,
-            "returncode": proc.returncode,
-            "stdout": proc.stdout.strip(),
-            "stderr": proc.stderr.strip(),
-        }
-    except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        if proc.returncode != 0:
+            raise RuntimeError(f"exit={proc.returncode}: {proc.stderr.strip()[:200]}")
+        return proc
+
+    result = retry_call(invoke)
+    if not result["ok"]:
+        return result
+    proc = result["value"]
+    return {
+        "ok": True,
+        "returncode": proc.returncode,
+        "stdout": proc.stdout.strip(),
+        "stderr": proc.stderr.strip(),
+        "attempts": result["attempts"],
+    }
 
 
 def host_snapshot(name, info):
     service = info.get("service")
-    commit_dir = info.get("commit_dir", "/root/krc721")
-    version_cmd = info.get("version_cmd", "/root/krc721/target/release/krc721d --version")
     process_pattern = info.get("process_pattern")
     nginx_host = info.get("nginx_host")
     if service:
         service_lines = f"""
 printf 'service=%s\\n' "$(systemctl is-active {service} || true)"
 printf 'exec_start=%s\\n' "$(systemctl show {service} -p ExecStart --value 2>/dev/null || true)"
+main_pid="$(systemctl show {service} -p MainPID --value 2>/dev/null || true)"
+printf 'main_pid=%s\\n' "$main_pid"
+printf 'running_exe=%s\\n' "$(readlink -f "/proc/$main_pid/exe" 2>/dev/null || true)"
+printf 'running_version=%s\\n' "$("/proc/$main_pid/exe" --version 2>/dev/null || true)"
+printf 'running_binary_sha256=%s\\n' "$(sha256sum "/proc/$main_pid/exe" 2>/dev/null | awk '{{print $1}}' || true)"
 printf 'block_not_found=%s\\n' "$(journalctl -u {service} --since '5 minutes ago' --no-pager 2>/dev/null | grep -Ec 'Block .*not found in chain state|Block .*not found in blockhash_to_score' || true)"
 printf 'sync_task_errors=%s\\n' "$(journalctl -u {service} --since '5 minutes ago' --no-pager 2>/dev/null | grep -Ec 'Nexus sync task error|ERROR|panic|thread.*panicked' || true)"
 printf 'stale_sync_forced=%s\\n' "$(journalctl -u {service} --since '5 minutes ago' --no-pager 2>/dev/null | grep -Ec 'historical response did not remove stale sync point' || true)"
@@ -238,9 +265,6 @@ printf 'node_service=%s\\n' "$(systemctl is-active {info['node_service']} || tru
 printf 'node_exec_start=%s\\n' "$(systemctl show {info['node_service']} -p ExecStart --value 2>/dev/null || true)"
 {f'''printf 'proxy_service=%s\\n' "$(systemctl is-active {info['proxy_service']} || true)"''' if info.get('proxy_service') else ''}
 {f'''printf 'forbidden_process_count=%s\\n' "$(pgrep -af -- '{info['forbidden_process_pattern']}' | grep -vc pgrep || true)"''' if info.get('forbidden_process_pattern') else ''}
-printf 'commit=%s\\n' "$(cd {commit_dir} && git rev-parse --short HEAD 2>/dev/null || true)"
-printf 'version=%s\\n' "$({version_cmd} 2>/dev/null || true)"
-printf 'binary_sha256=%s\\n' "$(sha256sum {info['expected_node_binary']} 2>/dev/null | awk '{{print $1}}' || true)"
 {nginx_lines}
 """
     raw = run_ssh(info["ssh"], command)
@@ -250,10 +274,19 @@ printf 'binary_sha256=%s\\n' "$(sha256sum {info['expected_node_binary']} 2>/dev/
             if "=" in line:
                 key, value = line.split("=", 1)
                 parsed[key] = value
+    version = parsed.get("running_version", "")
+    match = re.search(r"-([0-9a-f]{7,40})$", version)
+    parsed["commit"] = match.group(1) if match else ""
+    parsed["version"] = version
+    parsed["binary_sha256"] = parsed.get("running_binary_sha256", "")
     return parsed
 
 
-def check_statuses(report, failures, blue_lag_tolerance, check_legacy=False):
+def add_degradation(degradations, key, message):
+    degradations.append({"key": key, "message": message})
+
+
+def check_statuses(report, failures, degradations, blue_lag_tolerance, check_legacy=False):
     statuses = {}
     warnings = report.setdefault("warnings", [])
     counter_drifts = report.setdefault("counter_drifts", [])
@@ -278,7 +311,7 @@ def check_statuses(report, failures, blue_lag_tolerance, check_legacy=False):
             if name == "legacy":
                 warnings.append(message)
             else:
-                failures.append(message)
+                add_degradation(degradations, f"{name}_status_fetch", message)
             continue
         if name not in INDEXER_TARGETS:
             continue
@@ -287,7 +320,11 @@ def check_statuses(report, failures, blue_lag_tolerance, check_legacy=False):
         if status.get("isNodeSynced") is not True:
             failures.append(f"{name}: node not synced")
         if status.get("isIndexerSynced") is not True:
-            failures.append(f"{name}: indexer not synced")
+            add_degradation(
+                degradations,
+                f"{name}_indexer_unsynced",
+                f"{name}: indexer not synced at moving tip",
+            )
 
     prod2 = statuses.get("prod2")
     prod1 = statuses.get("prod1")
@@ -338,6 +375,26 @@ def check_statuses(report, failures, blue_lag_tolerance, check_legacy=False):
                 warnings.append(f"{name}: legacy blueScore lag {blue_lag} > {blue_lag_tolerance}")
 
     report["statuses"] = statuses
+
+
+def escalate_degradations(report, failures, degradations, threshold=DEGRADED_ALERT_RUNS):
+    state = read_state()
+    previous = state.get("degradation_streaks") or {}
+    current = {}
+    messages = {}
+    for item in degradations:
+        key = item["key"]
+        current[key] = int(previous.get(key, 0)) + 1
+        messages[key] = item["message"]
+    report["degradations"] = degradations
+    report["degradation_streaks"] = current
+    escalated = []
+    for key, streak in current.items():
+        if streak >= threshold:
+            message = f"{messages[key]} persisted for {streak} monitor runs"
+            failures.append(message)
+            escalated.append({"key": key, "streak": streak, "message": message})
+    report["escalated_degradations"] = escalated
 
 
 def escalate_persistent_counter_drift(report, failures):
@@ -476,21 +533,40 @@ def compare_prod_feeds(prod1_ops, prod2_ops, failures):
     return summary
 
 
-def check_recent_ops(report, failures, ops_window, check_legacy=False):
+def check_recent_ops(report, failures, degradations, ops_window, check_legacy=False):
     warnings = report.setdefault("warnings", [])
-    try:
-        prod1_ops = fetch_ops(BASES["prod1"], ops_window)
-    except Exception as exc:
-        failures.append(f"prod1: recent ops fetch failed: {type(exc).__name__}: {exc}")
+    statuses = report.get("statuses") or {}
+    unavailable = [
+        name for name in INDEXER_TARGETS if not isinstance(statuses.get(name), dict)
+    ]
+    if unavailable:
+        report["recent_ops"] = {
+            "reference": "symmetric_prod1_prod2",
+            "checked": 0,
+            "skipped": f"status unavailable for {','.join(unavailable)}",
+        }
+        return
+    prod1_result = safe_fetch_ops(BASES["prod1"], ops_window)
+    if not prod1_result["ok"]:
+        add_degradation(
+            degradations,
+            "prod1_recent_ops_fetch",
+            f"prod1: recent ops fetch failed after retries: {prod1_result['error']}",
+        )
         report["recent_ops"] = {"reference": "prod1", "checked": 0}
         return
+    prod1_ops = prod1_result["value"]
 
-    try:
-        prod2_ops = fetch_ops(BASES["prod2"], ops_window)
-    except Exception as exc:
-        failures.append(f"prod2: recent ops fetch failed: {type(exc).__name__}: {exc}")
+    prod2_result = safe_fetch_ops(BASES["prod2"], ops_window)
+    if not prod2_result["ok"]:
+        add_degradation(
+            degradations,
+            "prod2_recent_ops_fetch",
+            f"prod2: recent ops fetch failed after retries: {prod2_result['error']}",
+        )
         report["recent_ops"] = {"reference": "symmetric_prod1_prod2", "checked": 0}
         return
+    prod2_ops = prod2_result["value"]
 
     summary = compare_prod_feeds(prod1_ops, prod2_ops, failures)
 
@@ -509,9 +585,13 @@ def check_recent_ops(report, failures, ops_window, check_legacy=False):
     report["recent_ops"] = summary
 
 
-def check_known_txs(report, failures):
+def check_known_txs(report, failures, degradations):
     known = {}
+    statuses = report.get("statuses") or {}
     for label, expected in KNOWN_TXS.items():
+        if not isinstance(statuses.get(expected["host"]), dict):
+            known[label] = {"found": False, "skipped": "host status unavailable"}
+            continue
         op, payload = op_by_tx(BASES[expected["host"]], expected["txid"])
         actual = {
             "found": bool(op),
@@ -522,7 +602,14 @@ def check_known_txs(report, failures):
         }
         known[label] = actual
         if not op:
-            failures.append(f"{label}: tx missing on {expected['host']}")
+            if not payload.get("ok"):
+                add_degradation(
+                    degradations,
+                    f"{label}_probe",
+                    f"{label}: tx probe failed after retries: {payload.get('error')}",
+                )
+            else:
+                failures.append(f"{label}: tx missing on {expected['host']}")
         elif (
             (expected.get("op") and actual["op"] != expected["op"])
             or actual["tick"] != expected["tick"]
@@ -533,14 +620,20 @@ def check_known_txs(report, failures):
     report["known_txs"] = known
 
 
-def check_hosts(report, failures, expected_commit=None, expected_binary_sha256=None):
+def check_hosts(
+    report, failures, degradations, expected_commit=None, expected_binary_sha256=None
+):
     hosts = {}
     warnings = report.setdefault("warnings", [])
     for name, info in HOSTS.items():
         snapshot = host_snapshot(name, info)
         hosts[name] = snapshot
         if not snapshot.get("ssh_ok"):
-            failures.append(f"{name}: ssh check failed")
+            add_degradation(
+                degradations,
+                f"{name}_ssh",
+                f"{name}: SSH check failed after retries: {snapshot.get('raw_error')}",
+            )
             continue
         if snapshot.get("service") != "active":
             failures.append(f"{name}: indexer service {snapshot.get('service')}")
@@ -661,13 +754,19 @@ def telegram_send(text):
         return {"sent": False, "reason": f"{type(exc).__name__}: {exc}"}
 
 
-def maybe_alert(report, failures, no_alert=False):
+def incident_fingerprint(failures):
+    canonical = json.dumps(sorted(failures), separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16] if failures else ""
+
+
+def maybe_alert(report, failures, degradations, no_alert=False):
     if no_alert:
         state = read_state()
         report["alert"] = {"sent": False, "reason": "no_alert"}
         report["state"] = {
             "status": state.get("status", "ok"),
             "consecutive_failures": int(state.get("consecutive_failures", 0)),
+            "healthy_streak": int(state.get("healthy_streak", 0)),
             "last_alert_at": int(state.get("last_alert_at", 0)),
             "dry_run": True,
         }
@@ -676,24 +775,35 @@ def maybe_alert(report, failures, no_alert=False):
     state = read_state()
     now = int(time.time())
     consecutive_failures = int(state.get("consecutive_failures", 0))
+    healthy_streak = int(state.get("healthy_streak", 0))
     last_alert_at = int(state.get("last_alert_at", 0))
 
     if failures:
         consecutive_failures += 1
+        healthy_streak = 0
         status = "failing"
+    elif degradations:
+        consecutive_failures = 0
+        healthy_streak = 0
+        status = "degraded"
     else:
         consecutive_failures = 0
+        healthy_streak += 1
         status = "ok"
 
     alert = None
     alert_active = bool(state.get("alert_active", False))
 
-    new_alert = status == "failing" and consecutive_failures >= 2 and not alert_active
+    escalated_degradation = bool(report.get("escalated_degradations"))
+    new_alert = (
+        status == "failing"
+        and (consecutive_failures >= CRITICAL_ALERT_RUNS or escalated_degradation)
+        and not alert_active
+    )
     repeat_alert = (
         status == "failing"
         and alert_active
-        and consecutive_failures >= 2
-        and now - last_alert_at >= 3600
+        and now - last_alert_at >= REPEAT_ALERT_SECONDS
     )
     if new_alert or repeat_alert:
         text = (
@@ -707,7 +817,8 @@ def maybe_alert(report, failures, no_alert=False):
         if alert.get("sent"):
             last_alert_at = now
             alert_active = True
-    elif status == "ok" and alert_active:
+            state["active_incident_fingerprint"] = incident_fingerprint(failures)
+    elif status == "ok" and alert_active and healthy_streak >= RECOVERY_RUNS:
         text = (
             "KRC721 indexer monitor RECOVERED\n"
             f"time: {report['ts']}\n"
@@ -717,6 +828,7 @@ def maybe_alert(report, failures, no_alert=False):
         if alert.get("sent"):
             last_alert_at = now
             alert_active = False
+            state["active_incident_fingerprint"] = ""
     else:
         alert = {"sent": False, "reason": "threshold_not_met"}
 
@@ -724,12 +836,14 @@ def maybe_alert(report, failures, no_alert=False):
         {
             "status": status,
             "consecutive_failures": consecutive_failures,
+            "healthy_streak": healthy_streak,
             "last_alert_at": last_alert_at,
             "alert_active": alert_active,
             "last_run_at": now,
             "last_failures": failures[:20],
             "counter_drift_signature": report.get("counter_drift_signature", ""),
             "counter_drift_streak": int(report.get("counter_drift_streak", 0)),
+            "degradation_streaks": report.get("degradation_streaks", {}),
         }
     )
     write_state(state)
@@ -737,6 +851,7 @@ def maybe_alert(report, failures, no_alert=False):
     report["state"] = {
         "status": status,
         "consecutive_failures": consecutive_failures,
+        "healthy_streak": healthy_streak,
         "last_alert_at": last_alert_at,
         "alert_active": alert_active,
     }
@@ -754,19 +869,34 @@ def main():
 
     report = {"ts": utc_now()}
     failures = []
-    check_statuses(report, failures, args.blue_lag_tolerance, check_legacy=args.check_legacy)
+    degradations = []
+    check_statuses(
+        report,
+        failures,
+        degradations,
+        args.blue_lag_tolerance,
+        check_legacy=args.check_legacy,
+    )
     escalate_persistent_counter_drift(report, failures)
-    check_recent_ops(report, failures, args.ops_window, check_legacy=args.check_legacy)
-    check_known_txs(report, failures)
+    check_recent_ops(
+        report,
+        failures,
+        degradations,
+        args.ops_window,
+        check_legacy=args.check_legacy,
+    )
+    check_known_txs(report, failures, degradations)
     check_hosts(
         report,
         failures,
+        degradations,
         args.expected_commit,
         args.expected_binary_sha256,
     )
+    escalate_degradations(report, failures, degradations)
     report["ok"] = not failures
     report["failures"] = failures
-    maybe_alert(report, failures, no_alert=args.no_alert)
+    maybe_alert(report, failures, degradations, no_alert=args.no_alert)
     print(json.dumps(report, sort_keys=True))
     return 0 if report["ok"] else 1
 

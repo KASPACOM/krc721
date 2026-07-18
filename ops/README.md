@@ -1,8 +1,8 @@
-# KRC721 production parity monitor
+# KRC721 production monitors
 
-The monitor compares prod1 and prod2 symmetrically, validates all operation and fee counters, checks known incident transactions, verifies host services, and requires the deployed binary SHA-256 to match on both hosts.
+The parity monitor compares prod1 and prod2 symmetrically, validates operation and fee counters, checks known incident transactions, verifies host services, and hashes the executable behind each service's live `/proc/<MainPID>/exe`. It does not trust a checkout or an inactive binary path as deployment evidence.
 
-Install the script and units on the monitoring host, write the approved release values to `/etc/krc721-indexer-parity-monitor.env`, run `systemctl daemon-reload`, and enable `krc721-indexer-parity-monitor.timer`. The monitor alerts after two consecutive failures and repeats an active alert at most hourly.
+Install the script and units on the monitoring host, write the approved release values to `/etc/krc721-indexer-parity-monitor.env`, run `systemctl daemon-reload`, and enable `krc721-indexer-parity-monitor.timer`.
 
 ```ini
 EXPECTED_COMMIT=<approved-short-commit>
@@ -10,6 +10,21 @@ EXPECTED_BINARY_SHA256=<approved-release-sha256>
 ```
 
 Update both values atomically whenever an approved binary is deployed. This pins parity to the reviewed artifact instead of merely proving that both hosts run the same artifact.
+
+Critical data, service, node, and artifact failures alert after two consecutive
+runs. Moving-tip `isIndexerSynced=false` observations and retried transport
+errors are degradations; they alert only after five consecutive runs. Recovery
+requires two consecutive fully healthy runs, and an unresolved incident repeats
+at most every three hours.
+
+The cache monitor follows the same degradation and recovery policy. Its source
+and units are:
+
+```text
+ops/krc721-cache-monitor.py
+ops/krc721-cache-monitor.service
+ops/krc721-cache-monitor.timer
+```
 
 Run the unit tests with:
 
@@ -21,6 +36,7 @@ Run a non-alerting live check with:
 
 ```bash
 /usr/local/bin/krc721-indexer-parity-monitor.py --ops-window 500 --blue-lag-tolerance 360 --no-alert
+python3 ops/krc721-cache-monitor.py --no-alert
 ```
 
 Peer parity cannot detect a future defect that both indexers reproduce identically. The known transaction and NFT probes cover the incidents recorded here, but a general common-mode guarantee requires a separately implemented chain-derived KRC721 verifier.
