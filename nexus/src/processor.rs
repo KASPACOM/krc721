@@ -760,7 +760,7 @@ impl Processor {
             .collect::<krc721_database::result::Result<Vec<_>>>()?;
 
         if !blocks_to_remove.is_empty() {
-            warn!(
+            debug!(
                 "Removing {} chain block scores from reorg threshold {}",
                 blocks_to_remove.len(),
                 min_blue_score
@@ -1516,7 +1516,7 @@ impl Processor {
             "first key must be less than or equal to last key"
         );
         if first * last == 0 {
-            warn!("Empty queue, nothing to process. Can happen during fast catch up.");
+            debug!("Empty queue, nothing to process. Can happen during fast catch up.");
             return Ok(());
         }
         for i in first..=last {
