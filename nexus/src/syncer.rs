@@ -126,7 +126,7 @@ impl Syncer {
             }
 
             if from.blue_score >= sink.blue_score {
-                warn!(
+                debug!(
                     "last known block score is at or beyond sink but hash differs; replaying from {:?} to handle reorg against {:?}",
                     from, sink
                 );
