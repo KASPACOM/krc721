@@ -153,6 +153,18 @@ pub struct SendInfo {
     /// The listing UTXO txid being spent (from input[0].previous_outpoint)
     #[serde(skip)]
     pub listing_utxo_txid: TransactionId,
+    /// The listing UTXO output index being spent (from input[0].previous_outpoint).
+    #[serde(skip)]
+    #[borsh(skip)]
+    pub listing_utxo_index: u32,
+    /// Payment destination from tx output[0].
+    #[serde(skip)]
+    #[borsh(skip)]
+    pub seller_payment_script: Option<ScriptPublicKey>,
+    /// Redeem script revealed while spending the listing UTXO.
+    #[serde(skip)]
+    #[borsh(skip)]
+    pub spend_redeem_script: Option<Vec<u8>>,
 }
 
 #[serde_as]
@@ -253,6 +265,15 @@ pub enum CtxValidationError {
 
     #[error("Invalid listing P2SH address")]
     InvalidListingP2sh,
+
+    #[error("Listing spend redeem script does not match the stored listing script")]
+    InvalidListingRedeemScript,
+
+    #[error("Listing send is not authorized by the seller")]
+    InvalidListingSeller,
+
+    #[error("Listing payment output does not pay the seller")]
+    InvalidSellerPayment,
 }
 
 #[derive(Debug, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]

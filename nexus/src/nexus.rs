@@ -705,32 +705,6 @@ fn parse_kaspad_version(version: &str) -> Option<KaspadVersion> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_kaspad_versions_before_toc_5() {
-        assert!(!is_supported_kaspad_version("1.2.1-toc.3"));
-        assert!(!is_supported_kaspad_version("v1.3.0-toc.4"));
-    }
-
-    #[test]
-    fn accepts_minimum_toc_5_and_newer_versions() {
-        assert!(is_supported_kaspad_version("1.3.0-toc.5"));
-        assert!(is_supported_kaspad_version("kaspad v1.3.0-toc.5-04b0d135"));
-        assert!(is_supported_kaspad_version("kaspad v2.0.0"));
-        assert!(is_supported_kaspad_version("1.3.0"));
-        assert!(is_supported_kaspad_version("1.3.1-toc.1"));
-    }
-
-    #[test]
-    fn rejects_unparseable_kaspad_versions() {
-        assert!(!is_supported_kaspad_version("unknown"));
-        assert!(!is_supported_kaspad_version("1.3"));
-    }
-}
-
 const SERVICE: &str = "NEXUS";
 
 #[async_trait]
@@ -770,5 +744,31 @@ impl Service for Nexus {
         self.inner.shutdown.response.recv().await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_kaspad_versions_before_toc_5() {
+        assert!(!is_supported_kaspad_version("1.2.1-toc.3"));
+        assert!(!is_supported_kaspad_version("v1.3.0-toc.4"));
+    }
+
+    #[test]
+    fn accepts_minimum_toc_5_and_newer_versions() {
+        assert!(is_supported_kaspad_version("1.3.0-toc.5"));
+        assert!(is_supported_kaspad_version("kaspad v1.3.0-toc.5-04b0d135"));
+        assert!(is_supported_kaspad_version("kaspad v2.0.0"));
+        assert!(is_supported_kaspad_version("1.3.0"));
+        assert!(is_supported_kaspad_version("1.3.1-toc.1"));
+    }
+
+    #[test]
+    fn rejects_unparseable_kaspad_versions() {
+        assert!(!is_supported_kaspad_version("unknown"));
+        assert!(!is_supported_kaspad_version("1.3"));
     }
 }
