@@ -1563,6 +1563,8 @@ impl Processor {
         common: &OperationCommon,
         info: &SendInfo,
     ) -> Result<Result<(), CtxValidationError>> {
+        use kaspa_txscript::pay_to_script_hash_script;
+
         let listing_key = OwnershipKey {
             tick: common.tick,
             token_id: info.token_id,
@@ -1574,14 +1576,45 @@ impl Processor {
             Some(listing) => listing,
         };
 
-        // Validate input[0] spends the listing UTXO
-        if info.listing_utxo_txid != listing.listing_tx_id {
+        if pay_to_script_hash_script(&listing.redeem_script) != listing.utxo_address {
+            return Ok(Err(CtxValidationError::InvalidListingP2sh));
+        }
+
+        // Validate input[0] spends exactly output 0 of the tracked listing UTXO.
+        if info.listing_utxo_txid != listing.listing_tx_id || info.listing_utxo_index != 0 {
             return Ok(Err(CtxValidationError::WrongListingUtxo));
         }
 
         let tick = common.tick;
         let token_id = info.token_id;
         let seller = listing.seller.clone();
+
+        let Some(spend_redeem_script) = info.spend_redeem_script.as_ref() else {
+            return Ok(Err(CtxValidationError::InvalidListingRedeemScript));
+        };
+        if spend_redeem_script != &listing.redeem_script {
+            return Ok(Err(CtxValidationError::InvalidListingRedeemScript));
+        }
+
+        if common.sender != seller {
+            return Ok(Err(CtxValidationError::InvalidListingSeller));
+        }
+
+        let owner = self.db.current_ownership.get_wtx(wtx, &listing_key)?;
+        match owner {
+            None => return Ok(Err(CtxValidationError::TokenNotFound)),
+            Some(CurrentOwnershipValue { owner, .. }) if owner != seller => {
+                return Ok(Err(CtxValidationError::WrongOwner));
+            }
+            _ => {}
+        }
+
+        let Some(seller_payment_script) = info.seller_payment_script.as_ref() else {
+            return Ok(Err(CtxValidationError::InvalidSellerPayment));
+        };
+        if seller_payment_script != &seller {
+            return Ok(Err(CtxValidationError::InvalidSellerPayment));
+        }
 
         // If output[1] is present this is a sale; if absent it is a cancel/delist.
         if let Some(buyer) = &info.buyer {
@@ -1751,6 +1784,283 @@ mod tests {
         TransactionId::from_bytes([byte; 32])
     }
 
+    struct MarketplaceFixture {
+        db: Arc<Db>,
+        processor: Processor,
+        tick: Tick,
+        token_id: u64,
+        seller: ScriptPublicKey,
+        buyer: ScriptPublicKey,
+        listing_tx_id: TransactionId,
+        redeem_script: Vec<u8>,
+    }
+
+    fn marketplace_fixture(name: &str) -> (std::path::PathBuf, MarketplaceFixture) {
+        let db_folder = temp_db_folder(name);
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let token_id = 77;
+        let seller = dummy_pubkey_spk(0xAA);
+        let buyer = dummy_pubkey_spk(0xBB);
+        let listing_tx_id = dummy_tx_id(0x11);
+        let redeem_script = vec![0x51u8; 8];
+        let utxo_address = pay_to_script_hash_script(&redeem_script);
+        let listing_key = OwnershipKey { tick, token_id };
+
+        {
+            let mut wtx = db.write_tx();
+            db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    listing_key,
+                    &CurrentOwnershipValue {
+                        owner: seller.clone(),
+                        mod_tx_score: 100,
+                    },
+                )
+                .unwrap();
+            db.address_holdings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: seller.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &100,
+                )
+                .unwrap();
+            db.listings
+                .insert_wtx(
+                    &mut wtx,
+                    listing_key,
+                    &ListingValue {
+                        seller: seller.clone(),
+                        listing_tx_id,
+                        utxo_address: utxo_address.clone(),
+                        redeem_script: redeem_script.clone(),
+                        op_score: 200,
+                    },
+                )
+                .unwrap();
+            db.listings_by_tick
+                .insert_wtx(&mut wtx, ListingByTickKey { tick, token_id }, &())
+                .unwrap();
+            db.address_listings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: seller.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &200,
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("seed marketplace fixture");
+        }
+
+        (
+            db_folder,
+            MarketplaceFixture {
+                db,
+                processor,
+                tick,
+                token_id,
+                seller,
+                buyer,
+                listing_tx_id,
+                redeem_script,
+            },
+        )
+    }
+
+    fn send_common(f: &MarketplaceFixture, sender: ScriptPublicKey) -> OperationCommon {
+        OperationCommon {
+            tick: f.tick,
+            tx_id: dummy_tx_id(0x22),
+            block_time: 0,
+            sender,
+            fee: 0,
+            accepting_block_daa_score: 0,
+        }
+    }
+
+    fn valid_send_info(f: &MarketplaceFixture, buyer: Option<ScriptPublicKey>) -> SendInfo {
+        SendInfo {
+            token_id: f.token_id,
+            payment_amount: 1_000_000_000,
+            buyer,
+            listing_utxo_txid: f.listing_tx_id,
+            listing_utxo_index: 0,
+            seller_payment_script: Some(f.seller.clone()),
+            spend_redeem_script: Some(f.redeem_script.clone()),
+        }
+    }
+
+    fn process_fixture_send(
+        f: &MarketplaceFixture,
+        sender: ScriptPublicKey,
+        info: &SendInfo,
+    ) -> CtxValidationError {
+        let mut wtx = f.db.write_tx();
+        let err = f
+            .processor
+            .process_send(&mut wtx, 300, &send_common(f, sender), info)
+            .unwrap()
+            .unwrap_err();
+        wtx.commit().unwrap().expect("commit rejected send");
+        err
+    }
+
+    #[test]
+    fn marketplace_send_rejects_wrong_listing_output_index() {
+        let (db_folder, f) = marketplace_fixture("wrong_listing_index");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.listing_utxo_index = 1;
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::WrongListingUtxo
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_wrong_redeem_script() {
+        let (db_folder, f) = marketplace_fixture("wrong_redeem_script");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.spend_redeem_script = Some(vec![0x52u8; 8]);
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::InvalidListingRedeemScript
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_non_seller_sender() {
+        let (db_folder, f) = marketplace_fixture("wrong_sender");
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+
+        assert!(matches!(
+            process_fixture_send(&f, f.buyer.clone(), &info),
+            CtxValidationError::InvalidListingSeller
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_listing_when_current_owner_changed() {
+        let (db_folder, f) = marketplace_fixture("wrong_current_owner");
+        {
+            let mut wtx = f.db.write_tx();
+            f.db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipKey {
+                        tick: f.tick,
+                        token_id: f.token_id,
+                    },
+                    &CurrentOwnershipValue {
+                        owner: f.buyer.clone(),
+                        mod_tx_score: 250,
+                    },
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("owner change commit");
+        }
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::WrongOwner
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_payment_not_to_seller() {
+        let (db_folder, f) = marketplace_fixture("wrong_payment");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.seller_payment_script = Some(f.buyer.clone());
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::InvalidSellerPayment
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_accepts_valid_sale() {
+        let (db_folder, f) = marketplace_fixture("valid_sale");
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+        {
+            let mut wtx = f.db.write_tx();
+            f.processor
+                .process_send(&mut wtx, 300, &send_common(&f, f.seller.clone()), &info)
+                .unwrap()
+                .expect("valid sale should process");
+            wtx.commit().unwrap().expect("sale commit");
+        }
+
+        let rtx = f.db.read_tx();
+        let listing_key = OwnershipKey {
+            tick: f.tick,
+            token_id: f.token_id,
+        };
+        assert!(f.db.listings.get_rtx(&rtx, &listing_key).unwrap().is_none());
+        let ownership =
+            f.db.current_ownership
+                .get_rtx(&rtx, &listing_key)
+                .unwrap()
+                .expect("ownership should remain indexed");
+        assert_eq!(ownership.owner, f.buyer);
+        drop(rtx);
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_accepts_valid_cancel() {
+        let (db_folder, f) = marketplace_fixture("valid_cancel");
+        let info = valid_send_info(&f, None);
+        {
+            let mut wtx = f.db.write_tx();
+            f.processor
+                .process_send(&mut wtx, 300, &send_common(&f, f.seller.clone()), &info)
+                .unwrap()
+                .expect("valid cancel should process");
+            wtx.commit().unwrap().expect("cancel commit");
+        }
+
+        let rtx = f.db.read_tx();
+        let listing_key = OwnershipKey {
+            tick: f.tick,
+            token_id: f.token_id,
+        };
+        assert!(f.db.listings.get_rtx(&rtx, &listing_key).unwrap().is_none());
+        let ownership =
+            f.db.current_ownership
+                .get_rtx(&rtx, &listing_key)
+                .unwrap()
+                .expect("ownership should remain indexed");
+        assert_eq!(ownership.owner, f.seller);
+        drop(rtx);
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
     /// Regression test for the reorg-loses-listing bug.
     ///
     /// Sequence:
@@ -1819,6 +2129,9 @@ mod tests {
                     payment_amount: 0,
                     buyer: Some(buyer.clone()),
                     listing_utxo_txid: list_tx_id,
+                    listing_utxo_index: 0,
+                    seller_payment_script: Some(seller.clone()),
+                    spend_redeem_script: Some(redeem_script.clone()),
                 }),
             },
             error: None,
@@ -1948,6 +2261,9 @@ mod tests {
                     payment_amount: 0,
                     buyer: Some(buyer.clone()),
                     listing_utxo_txid: list_tx_id,
+                    listing_utxo_index: 0,
+                    seller_payment_script: Some(seller.clone()),
+                    spend_redeem_script: Some(redeem_script.clone()),
                 }),
             },
             error: None,

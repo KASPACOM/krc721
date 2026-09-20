@@ -51,6 +51,10 @@ pub trait ITransaction: Debug {
     fn output_amt(&self, index: usize) -> Option<u64>;
     /// Get the previous outpoint transaction ID of input at given index
     fn input_prev_txid(&self, index: usize) -> Option<TransactionId>;
+    /// Get the previous outpoint output index of input at given index
+    fn input_prev_index(&self, index: usize) -> Option<u32>;
+    /// Get the redeem script pushed in the input's P2SH signature script
+    fn input_redeem_script(&self, index: usize) -> Option<Vec<u8>>;
     /// Get the sender's pubkey bytes from the signature script (x-only, 32 bytes)
     fn sender_pubkey_bytes(&self) -> Option<Vec<u8>>;
 }
@@ -546,6 +550,21 @@ impl Analyzer {
                         .ok_or(AnalyzerError::OpSendMissingValue(
                             "input[0] previous outpoint",
                         ))?;
+                let listing_utxo_index =
+                    sigtx
+                        .input_prev_index(0)
+                        .ok_or(AnalyzerError::OpSendMissingValue(
+                            "input[0] previous outpoint index",
+                        ))?;
+                let seller_payment_script =
+                    sigtx
+                        .output_spk(0)
+                        .ok_or(AnalyzerError::OpSendMissingValue(
+                            "output[0] payment script",
+                        ))?;
+                let spend_redeem_script = sigtx
+                    .input_redeem_script(0)
+                    .ok_or(AnalyzerError::OpSendMissingValue("input[0] redeem script"))?;
 
                 Ok(Some(Operation {
                     common: OperationCommon {
@@ -561,6 +580,9 @@ impl Analyzer {
                         payment_amount,
                         buyer,
                         listing_utxo_txid,
+                        listing_utxo_index,
+                        seller_payment_script: Some(seller_payment_script),
+                        spend_redeem_script: Some(spend_redeem_script),
                     }),
                 }))
             }
@@ -590,6 +612,17 @@ fn parse_script<T: VerifiableTransaction, U: SigHashReusedValues>(
 ) -> impl Iterator<Item = std::result::Result<Box<dyn OpCodeImplementation<T, U>>, TxScriptError>> + '_
 {
     script.iter().batching(|it| deserialize_next_opcode(it))
+}
+
+fn p2sh_redeem_script(signature_script: &[u8]) -> Option<Vec<u8>> {
+    let mut opcodes =
+        parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(signature_script);
+    let second = opcodes.nth(1)?.ok()?;
+    if second.is_push_opcode() {
+        Some(second.get_data().to_vec())
+    } else {
+        None
+    }
 }
 
 impl ITransaction for ContextTransaction {
@@ -654,20 +687,23 @@ impl ITransaction for ContextTransaction {
             .map(|i| i.previous_outpoint.transaction_id)
     }
 
+    fn input_prev_index(&self, index: usize) -> Option<u32> {
+        self.tx.inputs.get(index).map(|i| i.previous_outpoint.index)
+    }
+
+    fn input_redeem_script(&self, index: usize) -> Option<Vec<u8>> {
+        self.tx
+            .inputs
+            .get(index)
+            .and_then(|i| p2sh_redeem_script(&i.signature_script))
+    }
+
     fn sender_pubkey_bytes(&self) -> Option<Vec<u8>> {
         // The first opcode in the signature script is the pubkey push
         let sig_script = self.tx.inputs.first()?.signature_script.as_slice();
-        let mut opcodes = parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(sig_script);
-        // In P2SH reveal: the redeem script is the second push
-        // In the redeem script itself: first push is the pubkey
-        // For our purposes, we parse the redeem script (second push in sig_script)
-        let second = opcodes.nth(1)?.ok()?;
-        if !second.is_push_opcode() {
-            return None;
-        }
-        let inner_data = second.get_data();
+        let inner_data = p2sh_redeem_script(sig_script)?;
         let inner_opcodes =
-            parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(inner_data)
+            parse_script::<PopulatedTransaction, SigHashReusedValuesSync>(&inner_data)
                 .collect::<Result<Vec<_>, _>>()
                 .ok()?;
         if inner_opcodes.is_empty() {
@@ -1032,6 +1068,20 @@ mod tests {
                 .map(|i| i.previous_outpoint.transaction_id)
         }
 
+        fn input_prev_index(&self, index: usize) -> Option<u32> {
+            self.transaction
+                .inputs
+                .get(index)
+                .map(|i| i.previous_outpoint.index)
+        }
+
+        fn input_redeem_script(&self, index: usize) -> Option<Vec<u8>> {
+            self.transaction
+                .inputs
+                .get(index)
+                .and_then(|i| p2sh_redeem_script(&i.signature_script))
+        }
+
         fn sender_pubkey_bytes(&self) -> Option<Vec<u8>> {
             // For tests, extract from the mock signature script
             Some(vec![231u8; 32])
@@ -1050,6 +1100,39 @@ mod tests {
             &[243u8; 32], // Mock transaction signature
         )
         .unwrap()
+    }
+
+    fn create_test_inscription_with_trailing_op_not(op: UserOperation) -> Vec<u8> {
+        use kaspa_txscript::opcodes::codes::OpNot;
+
+        let json = serde_json::to_string(&op).unwrap();
+        let redeem_script = ScriptBuilder::new()
+            .add_data(&[231u8; 32])
+            .unwrap()
+            .add_op(OpCheckSig)
+            .unwrap()
+            .add_op(OpFalse)
+            .unwrap()
+            .add_op(OpIf)
+            .unwrap()
+            .add_data(PROTOCOL_KSPR_NAMESPACE.as_bytes())
+            .unwrap()
+            .add_i64(0)
+            .unwrap()
+            .add_data(json.as_bytes())
+            .unwrap()
+            .add_op(OpEndIf)
+            .unwrap()
+            .add_op(OpNot)
+            .unwrap()
+            .drain();
+
+        ScriptBuilder::new()
+            .add_data(&[243u8; 32])
+            .unwrap()
+            .add_data(&redeem_script)
+            .unwrap()
+            .drain()
     }
 
     #[test]
@@ -1489,6 +1572,17 @@ mod tests {
                 assert_eq!(info.token_id, 42);
                 assert_eq!(info.payment_amount, 1_500_000_000);
                 assert_eq!(info.listing_utxo_txid, listing_txid);
+                assert_eq!(info.listing_utxo_index, 0);
+                assert_eq!(
+                    info.seller_payment_script
+                        .as_ref()
+                        .map(|spk| spk.script().to_vec()),
+                    Some(vec![10u8; 34])
+                );
+                assert!(info
+                    .spend_redeem_script
+                    .as_ref()
+                    .is_some_and(|s| { !s.is_empty() && s.last().copied() == Some(OpEndIf) }));
                 // Buyer should be output[1]
                 assert_eq!(
                     info.buyer.as_ref().map(|b| b.script().to_vec()),
@@ -1519,6 +1613,35 @@ mod tests {
         assert!(matches!(
             result,
             Err(AnalyzerError::OpSendMissingValue(field)) if field == "token_id"
+        ));
+    }
+
+    #[test]
+    fn test_detect_rejects_trailing_op_not_after_endif() {
+        let send_op = UserOperation::try_new(Protocol::Krc721, Op::Send, "KASPA")
+            .unwrap()
+            .with_token_id(42);
+        let script = create_test_inscription_with_trailing_op_not(send_op);
+        let tx = TestTransaction::with_inputs_outputs(
+            script.clone(),
+            vec![TransactionInput::new(
+                TransactionOutpoint::new(TransactionId::from_bytes([1u8; 32]), 0),
+                script,
+                0,
+                1,
+            )],
+            vec![
+                TransactionOutput::new(
+                    1_500_000_000,
+                    ScriptPublicKey::new(0, vec![10u8; 34].into()),
+                ),
+                TransactionOutput::new(500_000_000, ScriptPublicKey::new(0, vec![20u8; 34].into())),
+            ],
+        );
+
+        assert!(matches!(
+            detect_krc721(&tx),
+            Err(AnalyzerError::UnsupportedEnvelopeLength)
         ));
     }
 
