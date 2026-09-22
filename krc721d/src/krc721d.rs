@@ -123,8 +123,10 @@ impl Server {
                 utxo_index,
                 remote,
                 dry_run,
+                yes,
                 init_genesis,
                 get_genesis,
+                data_dir,
                 retention_period_days,
                 daa_ecdsa_fix,
             } = Args::parse();
@@ -140,7 +142,7 @@ impl Server {
                 indexer_config.daa_ecdsa_fix = daa_ecdsa_fix
             }
 
-            let folders = Folders::default();
+            let folders = Folders::new(data_dir);
 
             if log_level == LevelFilter::TRACE {
                 workflow_log::set_log_level(workflow_log::LevelFilter::Trace);
@@ -524,6 +526,91 @@ impl Server {
                     }
                     println!();
 
+                    Ok(None)
+                }
+                Mode::Rewind { blue_score } => {
+                    use cliclack::*;
+
+                    let db = Arc::new(Db::try_open(folders.data, &network)?);
+                    let metrics = Metrics::try_new(db.clone(), network)?;
+                    let counters = metrics.counters().clone();
+                    let processor = Processor::new(db, counters, None, None);
+                    let last = processor
+                        .last_accepted_block()?
+                        .ok_or_else(|| krc721_nexus::processor::Error::NoAcceptedBlockForRewind)?;
+                    if blue_score > last.blue_score {
+                        return Err(krc721_nexus::processor::Error::RewindBeyondTip {
+                            requested: blue_score,
+                            tip: last.blue_score,
+                        }
+                        .into());
+                    }
+                    let retained = processor.accepted_block_before(blue_score)?.ok_or(
+                        krc721_nexus::processor::Error::RewindWouldRemoveAllAcceptedBlocks {
+                            requested: blue_score,
+                        },
+                    )?;
+
+                    println!();
+                    intro("KRC721 database rewind")?;
+                    log::warning(format!(
+                        "This removes and rebuilds derived state inclusively from blue score {blue_score}; current tip is {} ({}), retained predecessor is {} ({})",
+                        last.blue_score,
+                        last.block_hash,
+                        retained.blue_score,
+                        retained.block_hash
+                    ))?;
+                    if dry_run {
+                        outro("Dry run complete; database was not changed")?;
+                        return Ok(None);
+                    }
+                    if !yes
+                        && !confirm("Proceed with the validated rewind?")
+                            .initial_value(false)
+                            .interact()?
+                    {
+                        log::warning("Database rewind aborted")?;
+                        return Ok(None);
+                    }
+
+                    processor.rewind_from_blue_score(blue_score)?;
+                    let last = processor.last_accepted_block()?;
+                    outro(format!(
+                        "Database rewind is complete; retained last accepted block: {last:?}"
+                    ))?;
+                    Ok(None)
+                }
+                Mode::RepairTransfer {
+                    source_data_dir,
+                    txid,
+                } => {
+                    use cliclack::*;
+                    use kaspa_consensus_core::tx::TransactionId;
+
+                    let txid = TransactionId::from_str(&txid)?;
+                    let source_folders = Folders::new(Some(source_data_dir));
+                    let source_db = Arc::new(Db::try_open(source_folders.data, &network)?);
+                    let source_view = nft_view::DbView::new(source_db);
+                    let source_operation =
+                        source_view.krc721_op_by_txid(txid)?.ok_or_else(|| {
+                            crate::error::Error::custom(format!(
+                                "repair transaction {txid} is missing from source database"
+                            ))
+                        })?;
+
+                    let target_db = Arc::new(Db::try_open(folders.data, &network)?);
+                    let metrics = Metrics::try_new(target_db.clone(), network)?;
+                    let counters = metrics.counters().clone();
+                    let processor = Processor::new(target_db, counters, None, None);
+
+                    println!();
+                    intro("KRC721 missing transfer repair")?;
+                    log::warning(format!(
+                        "Revalidating and applying transfer {txid} at operation score {} from the trusted source database",
+                        source_operation.opscore
+                    ))?;
+                    processor.repair_missing_transfer(source_operation)?;
+                    outro(format!("Transfer repair is complete: {txid}"))?;
                     Ok(None)
                 }
                 Mode::SyncReset { server } => {

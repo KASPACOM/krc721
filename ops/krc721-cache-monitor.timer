@@ -1,0 +1,12 @@
+[Unit]
+Description=Run KRC721 dev/prod cache monitor every 2 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=20s
+Persistent=true
+Unit=krc721-cache-monitor.service
+
+[Install]
+WantedBy=timers.target

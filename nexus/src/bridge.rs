@@ -13,6 +13,7 @@ pub trait BridgeT: Send + Sync + 'static {
     ) -> Result<GetVirtualChainFromBlockV2Response>;
     async fn get_block(&self, hash: RpcHash, include_transactions: bool) -> Result<RpcBlock>;
     async fn get_sink(&self) -> Result<BlueScoredChainBlockHash>;
+    async fn get_pruning_point(&self) -> Result<BlueScoredChainBlockHash>;
 }
 
 #[derive(Clone)]
@@ -57,6 +58,20 @@ impl BridgeT for RpcBridge {
         } else {
             Err(Error::NodeNotSynced)
         }
+    }
+
+    async fn get_pruning_point(&self) -> Result<BlueScoredChainBlockHash> {
+        let block_hash = self.rpc_api.get_block_dag_info().await?.pruning_point_hash;
+        let blue_score = self
+            .rpc_api
+            .get_block(block_hash, false)
+            .await?
+            .header
+            .blue_score;
+        Ok(BlueScoredChainBlockHash {
+            blue_score,
+            block_hash,
+        })
     }
 
     async fn get_block(&self, hash: RpcHash, include_transactions: bool) -> Result<RpcBlock> {

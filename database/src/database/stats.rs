@@ -68,63 +68,6 @@ impl BorshDeserialize for Stats {
 
 pub type StatsDiffs = Stats;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Encodes only the 5 v1 fields to simulate an old snapshot record.
-    fn v1_bytes(s: &Stats) -> Vec<u8> {
-        let mut buf = Vec::new();
-        borsh::to_writer(&mut buf, &s.deployments).unwrap();
-        borsh::to_writer(&mut buf, &s.mints).unwrap();
-        borsh::to_writer(&mut buf, &s.transfers).unwrap();
-        borsh::to_writer(&mut buf, &s.royalty_fees).unwrap();
-        borsh::to_writer(&mut buf, &s.security_fees).unwrap();
-        buf
-    }
-
-    #[test]
-    fn test_stats_v1_compat() {
-        let original = Stats {
-            deployments: 10,
-            mints: 20,
-            transfers: 30,
-            royalty_fees: 40,
-            security_fees: 50,
-            listings: 0,
-            sends: 0,
-        };
-        let bytes = v1_bytes(&original);
-        assert_eq!(bytes.len(), 40); // 5 × 8 bytes
-        let decoded: Stats = borsh::from_slice(&bytes).expect("v1 decode failed");
-        assert_eq!(decoded.deployments, 10);
-        assert_eq!(decoded.mints, 20);
-        assert_eq!(decoded.transfers, 30);
-        assert_eq!(decoded.royalty_fees, 40);
-        assert_eq!(decoded.security_fees, 50);
-        assert_eq!(decoded.listings, 0); // defaulted
-        assert_eq!(decoded.sends, 0); // defaulted
-    }
-
-    #[test]
-    fn test_stats_v2_roundtrip() {
-        let original = Stats {
-            deployments: 1,
-            mints: 2,
-            transfers: 3,
-            royalty_fees: 4,
-            security_fees: 5,
-            listings: 6,
-            sends: 7,
-        };
-        let bytes = borsh::to_vec(&original).unwrap();
-        assert_eq!(bytes.len(), 56); // 7 × 8 bytes
-        let decoded: Stats = borsh::from_slice(&bytes).expect("v2 decode failed");
-        assert_eq!(decoded.listings, 6);
-        assert_eq!(decoded.sends, 7);
-    }
-}
-
 impl AddAssign for Stats {
     fn add_assign(&mut self, rhs: StatsDiffs) {
         *self = *self + rhs
@@ -206,5 +149,62 @@ impl Sub for Stats {
             listings: listings.saturating_sub(listings_rhs),
             sends: sends.saturating_sub(sends_rhs),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Encodes only the 5 v1 fields to simulate an old snapshot record.
+    fn v1_bytes(s: &Stats) -> Vec<u8> {
+        let mut buf = Vec::new();
+        borsh::to_writer(&mut buf, &s.deployments).unwrap();
+        borsh::to_writer(&mut buf, &s.mints).unwrap();
+        borsh::to_writer(&mut buf, &s.transfers).unwrap();
+        borsh::to_writer(&mut buf, &s.royalty_fees).unwrap();
+        borsh::to_writer(&mut buf, &s.security_fees).unwrap();
+        buf
+    }
+
+    #[test]
+    fn test_stats_v1_compat() {
+        let original = Stats {
+            deployments: 10,
+            mints: 20,
+            transfers: 30,
+            royalty_fees: 40,
+            security_fees: 50,
+            listings: 0,
+            sends: 0,
+        };
+        let bytes = v1_bytes(&original);
+        assert_eq!(bytes.len(), 40); // 5 x 8 bytes
+        let decoded: Stats = borsh::from_slice(&bytes).expect("v1 decode failed");
+        assert_eq!(decoded.deployments, 10);
+        assert_eq!(decoded.mints, 20);
+        assert_eq!(decoded.transfers, 30);
+        assert_eq!(decoded.royalty_fees, 40);
+        assert_eq!(decoded.security_fees, 50);
+        assert_eq!(decoded.listings, 0); // defaulted
+        assert_eq!(decoded.sends, 0); // defaulted
+    }
+
+    #[test]
+    fn test_stats_v2_roundtrip() {
+        let original = Stats {
+            deployments: 1,
+            mints: 2,
+            transfers: 3,
+            royalty_fees: 4,
+            security_fees: 5,
+            listings: 6,
+            sends: 7,
+        };
+        let bytes = borsh::to_vec(&original).unwrap();
+        assert_eq!(bytes.len(), 56); // 7 x 8 bytes
+        let decoded: Stats = borsh::from_slice(&bytes).expect("v2 decode failed");
+        assert_eq!(decoded.listings, 6);
+        assert_eq!(decoded.sends, 7);
     }
 }

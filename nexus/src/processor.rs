@@ -1,5 +1,5 @@
 use crate::metrics::Counters;
-use crate::{calculate_blue_score_from_tx_score, calculate_tx_score, calculate_tx_score_from_blue};
+use crate::{calculate_blue_score_from_tx_score, calculate_tx_score, checked_tx_score_from_blue};
 use ahash::AHashMap;
 use async_std::channel::Sender;
 use async_trait::async_trait;
@@ -162,6 +162,108 @@ impl Processor {
     pub fn last_accepted_block(&self) -> Result<Option<BlueScoredChainBlockHash>> {
         let rtx = self.db.read_tx();
         Ok(self.db.chain_block_scores.last_accepted_block_rtx(&rtx)?)
+    }
+
+    /// Returns the newest accepted block strictly below `blue_score`.
+    pub fn accepted_block_before(
+        &self,
+        blue_score: u64,
+    ) -> Result<Option<BlueScoredChainBlockHash>> {
+        let rtx = self.db.read_tx();
+        let upper_bound = BlueScoredChainBlockHash {
+            blue_score,
+            block_hash: RpcHash::default(),
+        };
+        self.db
+            .chain_block_scores
+            .range_rtx(&rtx, ..upper_bound)
+            .next_back()
+            .transpose()
+            .map(|entry| entry.map(|(block, ())| block))
+            .map_err(Into::into)
+    }
+
+    /// Inclusively removes derived state at and above `blue_score` for canonical replay.
+    pub fn rewind_from_blue_score(&self, blue_score: u64) -> Result<()> {
+        let tip = self
+            .last_accepted_block()?
+            .ok_or(Error::NoAcceptedBlockForRewind)?;
+        if blue_score > tip.blue_score {
+            return Err(Error::RewindBeyondTip {
+                requested: blue_score,
+                tip: tip.blue_score,
+            });
+        }
+        let mut tx = self.db.write_tx();
+        let stats_diffs = self.process_removal(&mut tx, &[], Some(blue_score))?;
+        let stats = self.db.stats.removal(&mut tx, stats_diffs)?;
+        tx.commit()
+            .map_err(krc721_database::error::Error::Fjall)?
+            .map_err(|_| Error::RewindWriteConflict)?;
+        self.counters.update_from_stats(&stats);
+        Ok(())
+    }
+
+    /// Applies one historically missed transfer from a trusted source database.
+    ///
+    /// This deliberately supports transfers only: replaying a mint outside its
+    /// accepting mergeset would not have the entropy required to preserve the
+    /// canonical token ID. The target-state validation and score guard make the
+    /// repair fail closed if later ownership state already exists.
+    pub fn repair_missing_transfer(&self, source: ScoredCheckedOperation) -> Result<()> {
+        let ScoredCheckedOperation {
+            opscore,
+            checked_operation,
+        } = source;
+        let tx_id = checked_operation.operation.common.tx_id;
+        let (tick, token_id) = match &checked_operation.operation.info {
+            OperationInfo::Transfer(info) => {
+                (checked_operation.operation.common.tick, info.token_id)
+            }
+            _ => return Err(Error::RepairNotTransfer),
+        };
+
+        let mut tx = self.db.write_tx();
+        if self.db.tx_id_to_opscore.get_wtx(&mut tx, &tx_id)?.is_some() {
+            return Err(Error::RepairAlreadyExists(tx_id.to_string()));
+        }
+        if let Some(CurrentOwnershipValue { mod_tx_score, .. }) = self
+            .db
+            .current_ownership
+            .get_wtx(&mut tx, &OwnershipKey { tick, token_id })?
+        {
+            if mod_tx_score >= opscore {
+                return Err(Error::RepairWouldRewriteLaterState {
+                    repair_score: opscore,
+                    current_score: mod_tx_score,
+                });
+            }
+        }
+
+        let stats_diffs = self.process_nft_operations(
+            &mut tx,
+            [ContextOperation {
+                tx_score: opscore,
+                operation: checked_operation.operation,
+                // Transfers do not consume mergeset entropy.
+                mergeset_entropy: 0,
+            }],
+        )?;
+        let repaired = self
+            .db
+            .operation_history
+            .get_wtx(&mut tx, &opscore)?
+            .expect("the repair operation was inserted in this write transaction");
+        if let Some(error) = repaired.error {
+            return Err(Error::RepairValidation(format!("{error:?}")));
+        }
+
+        let stats = self.db.stats.addition(&mut tx, stats_diffs)?;
+        tx.commit()
+            .map_err(krc721_database::error::Error::Fjall)?
+            .map_err(|_| Error::RepairWriteConflict)?;
+        self.counters.update_from_stats(&stats);
+        Ok(())
     }
 
     pub fn switch_to_queue_mod(&self) -> Result<(), SendError<RTNotification>> {
@@ -367,7 +469,8 @@ impl Processor {
         };
 
         // Step 2: Calculate transaction score threshold for dependent data cleanup
-        let tx_score_threshold = calculate_tx_score_from_blue(min_blue_score);
+        let tx_score_threshold = checked_tx_score_from_blue(min_blue_score)
+            .ok_or(Error::BlueScoreOverflow(min_blue_score))?;
 
         // Step 3: Remove NFT operations above the score threshold to maintain consistency
         stat_diffs = self.remove_affected_operations(tx, tx_score_threshold)?;
@@ -657,7 +760,7 @@ impl Processor {
             .collect::<krc721_database::result::Result<Vec<_>>>()?;
 
         if !blocks_to_remove.is_empty() {
-            warn!(
+            debug!(
                 "Removing {} chain block scores from reorg threshold {}",
                 blocks_to_remove.len(),
                 min_blue_score
@@ -958,42 +1061,53 @@ impl Processor {
             warn!("Affected keys: {:?}", affected_keys);
         }
 
-        // Now process each key with a new borrow of tx
-        affected_keys
-            .into_iter()
-            .rev()
-            .map(|k| {
-                let holder = self.db.ownership_history.remove_if_exists_wtx(
-                    tx,
-                    &OwnershipHistoryKey::with_score(k.tick, k.token_id, k.score),
-                )?;
-                self.db.ownership_changes.remove_wtx(tx, &k)?;
-                if (self.db.mint_history.remove_if_exists_wtx(
-                    tx,
-                    &MintHistoryKey::new(k.tick, k.reversed_seq_number, k.token_id, k.score),
-                )?)
-                .is_some()
-                {
-                    let premint_data = {
-                        if let Some(premint_data) = premint_from_removed.get(&k.tick) {
-                            premint_data
-                        } else {
-                            &self
-                                .db
-                                .collection_registry
-                                .get_wtx(tx, &k.tick)?
-                                .map(|d| d.info.info.premint)
-                                .expect("Fallback should not fail")
-                        }
-                    };
-                    if k.token_id > *premint_data {
-                        self.rollback_token_generation(tx, &k.tick, k.token_id)
-                            .expect("Rollback should never fail");
-                    }
-                }
-                Ok((k, holder))
-            })
-            .collect()
+        let mut affected_tokens = Vec::with_capacity(affected_keys.len());
+        let mut minted_tokens = Vec::new();
+
+        // Ownership history can be removed in reverse operation order, but token range
+        // generation has a stricter invariant: mints for each collection must be undone
+        // in descending mint-sequence order. TokenMintsKey is ordered by score and then
+        // token id, so simply reversing the partition scan is not sufficient when more
+        // than one mint for a collection shares an accepting score.
+        for k in affected_keys.into_iter().rev() {
+            let holder = self.db.ownership_history.remove_if_exists_wtx(
+                tx,
+                &OwnershipHistoryKey::with_score(k.tick, k.token_id, k.score),
+            )?;
+            self.db.ownership_changes.remove_wtx(tx, &k)?;
+            if (self.db.mint_history.remove_if_exists_wtx(
+                tx,
+                &MintHistoryKey::new(k.tick, k.reversed_seq_number, k.token_id, k.score),
+            )?)
+            .is_some()
+            {
+                minted_tokens.push((k.tick, u64::MAX - k.reversed_seq_number, k.token_id));
+            }
+            affected_tokens.push((k, holder));
+        }
+
+        minted_tokens.sort_unstable_by(|(left_tick, left_seq, _), (right_tick, right_seq, _)| {
+            left_tick
+                .cmp(right_tick)
+                .then_with(|| right_seq.cmp(left_seq))
+        });
+        for (tick, _seq, token_id) in minted_tokens {
+            let premint = if let Some(premint) = premint_from_removed.get(&tick) {
+                *premint
+            } else {
+                self.db
+                    .collection_registry
+                    .get_wtx(tx, &tick)?
+                    .map(|d| d.info.info.premint)
+                    .expect("collection must exist when rolling back a retained deployment")
+            };
+            if token_id > premint {
+                self.rollback_token_generation(tx, &tick, token_id)
+                    .expect("token generation rollback must follow reverse mint sequence");
+            }
+        }
+
+        Ok(affected_tokens)
     }
 
     /// Remove current ownership records for the given tokens.
@@ -1402,7 +1516,7 @@ impl Processor {
             "first key must be less than or equal to last key"
         );
         if first * last == 0 {
-            warn!("Empty queue, nothing to process. Can happen during fast catch up.");
+            debug!("Empty queue, nothing to process. Can happen during fast catch up.");
             return Ok(());
         }
         for i in first..=last {
@@ -1563,6 +1677,8 @@ impl Processor {
         common: &OperationCommon,
         info: &SendInfo,
     ) -> Result<Result<(), CtxValidationError>> {
+        use kaspa_txscript::pay_to_script_hash_script;
+
         let listing_key = OwnershipKey {
             tick: common.tick,
             token_id: info.token_id,
@@ -1574,14 +1690,45 @@ impl Processor {
             Some(listing) => listing,
         };
 
-        // Validate input[0] spends the listing UTXO
-        if info.listing_utxo_txid != listing.listing_tx_id {
+        if pay_to_script_hash_script(&listing.redeem_script) != listing.utxo_address {
+            return Ok(Err(CtxValidationError::InvalidListingP2sh));
+        }
+
+        // Validate input[0] spends exactly output 0 of the tracked listing UTXO.
+        if info.listing_utxo_txid != listing.listing_tx_id || info.listing_utxo_index != 0 {
             return Ok(Err(CtxValidationError::WrongListingUtxo));
         }
 
         let tick = common.tick;
         let token_id = info.token_id;
         let seller = listing.seller.clone();
+
+        let Some(spend_redeem_script) = info.spend_redeem_script.as_ref() else {
+            return Ok(Err(CtxValidationError::InvalidListingRedeemScript));
+        };
+        if spend_redeem_script != &listing.redeem_script {
+            return Ok(Err(CtxValidationError::InvalidListingRedeemScript));
+        }
+
+        if common.sender != seller {
+            return Ok(Err(CtxValidationError::InvalidListingSeller));
+        }
+
+        let owner = self.db.current_ownership.get_wtx(wtx, &listing_key)?;
+        match owner {
+            None => return Ok(Err(CtxValidationError::TokenNotFound)),
+            Some(CurrentOwnershipValue { owner, .. }) if owner != seller => {
+                return Ok(Err(CtxValidationError::WrongOwner));
+            }
+            _ => {}
+        }
+
+        let Some(seller_payment_script) = info.seller_payment_script.as_ref() else {
+            return Ok(Err(CtxValidationError::InvalidSellerPayment));
+        };
+        if seller_payment_script != &seller {
+            return Ok(Err(CtxValidationError::InvalidSellerPayment));
+        }
 
         // If output[1] is present this is a sale; if absent it is a cancel/delist.
         if let Some(buyer) = &info.buyer {
@@ -1721,9 +1868,11 @@ struct ContextOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::calculate_tx_score_from_blue;
     use kaspa_consensus_core::tx::{ScriptPublicKey, ScriptVec, TransactionId};
     use kaspa_txscript::pay_to_script_hash_script;
     use krc721_core::network::Network;
+    use krc721_database::database::TokenMetaKey;
     use std::str::FromStr;
 
     fn temp_db_folder(name: &str) -> std::path::PathBuf {
@@ -1749,6 +1898,385 @@ mod tests {
 
     fn dummy_tx_id(byte: u8) -> TransactionId {
         TransactionId::from_bytes([byte; 32])
+    }
+
+    #[test]
+    fn repairs_one_missing_transfer_without_replaying_mints() {
+        let db_folder = temp_db_folder("repair_missing_transfer");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let token_id = 474;
+        let sender = dummy_pubkey_spk(0xAA);
+        let receiver = dummy_pubkey_spk(0xBB);
+        let mint_score = 100;
+        let transfer_score = 200;
+        let transfer_tx_id = dummy_tx_id(0xCC);
+
+        {
+            let mut wtx = db.write_tx();
+            db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipKey { tick, token_id },
+                    &CurrentOwnershipValue {
+                        owner: sender.clone(),
+                        mod_tx_score: mint_score,
+                    },
+                )
+                .unwrap();
+            db.ownership_history
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipHistoryKey::with_score(tick, token_id, mint_score),
+                    &sender,
+                )
+                .unwrap();
+            db.address_holdings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: sender.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &mint_score,
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("seed commit");
+        }
+
+        let source = || ScoredCheckedOperation {
+            opscore: transfer_score,
+            checked_operation: CheckedOperation {
+                operation: Operation {
+                    common: OperationCommon {
+                        tick,
+                        tx_id: transfer_tx_id,
+                        block_time: 0,
+                        sender: sender.clone(),
+                        fee: 292_900,
+                        accepting_block_daa_score: 0,
+                    },
+                    info: OperationInfo::Transfer(TransferInfo {
+                        token_id,
+                        to: receiver.clone(),
+                    }),
+                },
+                // A source replay may have rejected the operation because its
+                // token IDs were non-canonical. Target state is revalidated.
+                error: Some(CtxValidationError::TokenNotFound),
+            },
+        };
+
+        processor.repair_missing_transfer(source()).unwrap();
+
+        let rtx = db.read_tx();
+        let repaired = db
+            .operation_history
+            .get_rtx(&rtx, &transfer_score)
+            .unwrap()
+            .unwrap();
+        assert!(repaired.error.is_none());
+        assert_eq!(
+            db.tx_id_to_opscore.get_rtx(&rtx, &transfer_tx_id).unwrap(),
+            Some(transfer_score)
+        );
+        let ownership = db
+            .current_ownership
+            .get_rtx(&rtx, &OwnershipKey { tick, token_id })
+            .unwrap()
+            .unwrap();
+        assert_eq!(ownership.owner, receiver);
+        assert_eq!(ownership.mod_tx_score, transfer_score);
+        let stats = db.stats.load(&rtx).unwrap();
+        assert_eq!(stats.transfers, 1);
+        assert_eq!(stats.security_fees, 292_900);
+        drop(rtx);
+
+        assert!(matches!(
+            processor.repair_missing_transfer(source()),
+            Err(Error::RepairAlreadyExists(_))
+        ));
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    struct MarketplaceFixture {
+        db: Arc<Db>,
+        processor: Processor,
+        tick: Tick,
+        token_id: u64,
+        seller: ScriptPublicKey,
+        buyer: ScriptPublicKey,
+        listing_tx_id: TransactionId,
+        redeem_script: Vec<u8>,
+    }
+
+    fn marketplace_fixture(name: &str) -> (std::path::PathBuf, MarketplaceFixture) {
+        let db_folder = temp_db_folder(name);
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+
+        let tick = Tick::from_str("TESTNFT").unwrap();
+        let token_id = 77;
+        let seller = dummy_pubkey_spk(0xAA);
+        let buyer = dummy_pubkey_spk(0xBB);
+        let listing_tx_id = dummy_tx_id(0x11);
+        let redeem_script = vec![0x51u8; 8];
+        let utxo_address = pay_to_script_hash_script(&redeem_script);
+        let listing_key = OwnershipKey { tick, token_id };
+
+        {
+            let mut wtx = db.write_tx();
+            db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    listing_key,
+                    &CurrentOwnershipValue {
+                        owner: seller.clone(),
+                        mod_tx_score: 100,
+                    },
+                )
+                .unwrap();
+            db.address_holdings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: seller.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &100,
+                )
+                .unwrap();
+            db.listings
+                .insert_wtx(
+                    &mut wtx,
+                    listing_key,
+                    &ListingValue {
+                        seller: seller.clone(),
+                        listing_tx_id,
+                        utxo_address: utxo_address.clone(),
+                        redeem_script: redeem_script.clone(),
+                        op_score: 200,
+                    },
+                )
+                .unwrap();
+            db.listings_by_tick
+                .insert_wtx(&mut wtx, ListingByTickKey { tick, token_id }, &())
+                .unwrap();
+            db.address_listings
+                .insert_wtx(
+                    &mut wtx,
+                    AddressHoldingKey {
+                        spk: seller.clone(),
+                        tick,
+                        token_id,
+                    },
+                    &200,
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("seed marketplace fixture");
+        }
+
+        (
+            db_folder,
+            MarketplaceFixture {
+                db,
+                processor,
+                tick,
+                token_id,
+                seller,
+                buyer,
+                listing_tx_id,
+                redeem_script,
+            },
+        )
+    }
+
+    fn send_common(f: &MarketplaceFixture, sender: ScriptPublicKey) -> OperationCommon {
+        OperationCommon {
+            tick: f.tick,
+            tx_id: dummy_tx_id(0x22),
+            block_time: 0,
+            sender,
+            fee: 0,
+            accepting_block_daa_score: 0,
+        }
+    }
+
+    fn valid_send_info(f: &MarketplaceFixture, buyer: Option<ScriptPublicKey>) -> SendInfo {
+        SendInfo {
+            token_id: f.token_id,
+            payment_amount: 1_000_000_000,
+            buyer,
+            listing_utxo_txid: f.listing_tx_id,
+            listing_utxo_index: 0,
+            seller_payment_script: Some(f.seller.clone()),
+            spend_redeem_script: Some(f.redeem_script.clone()),
+        }
+    }
+
+    fn process_fixture_send(
+        f: &MarketplaceFixture,
+        sender: ScriptPublicKey,
+        info: &SendInfo,
+    ) -> CtxValidationError {
+        let mut wtx = f.db.write_tx();
+        let err = f
+            .processor
+            .process_send(&mut wtx, 300, &send_common(f, sender), info)
+            .unwrap()
+            .unwrap_err();
+        wtx.commit().unwrap().expect("commit rejected send");
+        err
+    }
+
+    #[test]
+    fn marketplace_send_rejects_wrong_listing_output_index() {
+        let (db_folder, f) = marketplace_fixture("wrong_listing_index");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.listing_utxo_index = 1;
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::WrongListingUtxo
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_wrong_redeem_script() {
+        let (db_folder, f) = marketplace_fixture("wrong_redeem_script");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.spend_redeem_script = Some(vec![0x52u8; 8]);
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::InvalidListingRedeemScript
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_non_seller_sender() {
+        let (db_folder, f) = marketplace_fixture("wrong_sender");
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+
+        assert!(matches!(
+            process_fixture_send(&f, f.buyer.clone(), &info),
+            CtxValidationError::InvalidListingSeller
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_listing_when_current_owner_changed() {
+        let (db_folder, f) = marketplace_fixture("wrong_current_owner");
+        {
+            let mut wtx = f.db.write_tx();
+            f.db.current_ownership
+                .insert_wtx(
+                    &mut wtx,
+                    OwnershipKey {
+                        tick: f.tick,
+                        token_id: f.token_id,
+                    },
+                    &CurrentOwnershipValue {
+                        owner: f.buyer.clone(),
+                        mod_tx_score: 250,
+                    },
+                )
+                .unwrap();
+            wtx.commit().unwrap().expect("owner change commit");
+        }
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::WrongOwner
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_rejects_payment_not_to_seller() {
+        let (db_folder, f) = marketplace_fixture("wrong_payment");
+        let mut info = valid_send_info(&f, Some(f.buyer.clone()));
+        info.seller_payment_script = Some(f.buyer.clone());
+
+        assert!(matches!(
+            process_fixture_send(&f, f.seller.clone(), &info),
+            CtxValidationError::InvalidSellerPayment
+        ));
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_accepts_valid_sale() {
+        let (db_folder, f) = marketplace_fixture("valid_sale");
+        let info = valid_send_info(&f, Some(f.buyer.clone()));
+        {
+            let mut wtx = f.db.write_tx();
+            f.processor
+                .process_send(&mut wtx, 300, &send_common(&f, f.seller.clone()), &info)
+                .unwrap()
+                .expect("valid sale should process");
+            wtx.commit().unwrap().expect("sale commit");
+        }
+
+        let rtx = f.db.read_tx();
+        let listing_key = OwnershipKey {
+            tick: f.tick,
+            token_id: f.token_id,
+        };
+        assert!(f.db.listings.get_rtx(&rtx, &listing_key).unwrap().is_none());
+        let ownership =
+            f.db.current_ownership
+                .get_rtx(&rtx, &listing_key)
+                .unwrap()
+                .expect("ownership should remain indexed");
+        assert_eq!(ownership.owner, f.buyer);
+        drop(rtx);
+
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn marketplace_send_accepts_valid_cancel() {
+        let (db_folder, f) = marketplace_fixture("valid_cancel");
+        let info = valid_send_info(&f, None);
+        {
+            let mut wtx = f.db.write_tx();
+            f.processor
+                .process_send(&mut wtx, 300, &send_common(&f, f.seller.clone()), &info)
+                .unwrap()
+                .expect("valid cancel should process");
+            wtx.commit().unwrap().expect("cancel commit");
+        }
+
+        let rtx = f.db.read_tx();
+        let listing_key = OwnershipKey {
+            tick: f.tick,
+            token_id: f.token_id,
+        };
+        assert!(f.db.listings.get_rtx(&rtx, &listing_key).unwrap().is_none());
+        let ownership =
+            f.db.current_ownership
+                .get_rtx(&rtx, &listing_key)
+                .unwrap()
+                .expect("ownership should remain indexed");
+        assert_eq!(ownership.owner, f.seller);
+        drop(rtx);
+
+        let _ = std::fs::remove_dir_all(&db_folder);
     }
 
     /// Regression test for the reorg-loses-listing bug.
@@ -1819,6 +2347,9 @@ mod tests {
                     payment_amount: 0,
                     buyer: Some(buyer.clone()),
                     listing_utxo_txid: list_tx_id,
+                    listing_utxo_index: 0,
+                    seller_payment_script: Some(seller.clone()),
+                    spend_redeem_script: Some(redeem_script.clone()),
                 }),
             },
             error: None,
@@ -1948,6 +2479,9 @@ mod tests {
                     payment_amount: 0,
                     buyer: Some(buyer.clone()),
                     listing_utxo_txid: list_tx_id,
+                    listing_utxo_index: 0,
+                    seller_payment_script: Some(seller.clone()),
+                    spend_redeem_script: Some(redeem_script.clone()),
                 }),
             },
             error: None,
@@ -2083,8 +2617,8 @@ mod tests {
     }
 
     #[test]
-    fn reorg_removal_prunes_later_chain_blocks_so_deleted_ops_can_replay() {
-        let db_folder = temp_db_folder("reorg_prunes_later_chain_blocks");
+    fn forced_reorg_removal_prunes_later_blocks_and_counts_removed_operations() {
+        let db_folder = temp_db_folder("forced_reorg_prunes_later_chain_blocks");
         let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
         let counters = Arc::new(Counters::default());
         let processor = Processor::new(db.clone(), counters, None, None);
@@ -2145,7 +2679,7 @@ mod tests {
         {
             let mut wtx = db.write_tx();
             let diff = processor
-                .process_removal(&mut wtx, &[stale_block], None)
+                .process_removal(&mut wtx, &[stale_block], Some(stale_score))
                 .unwrap();
             assert_eq!(diff.transfers, 1);
             wtx.commit().unwrap().expect("reorg commit");
@@ -2173,13 +2707,12 @@ mod tests {
     }
 
     #[test]
-    fn forced_reorg_removal_prunes_when_stale_block_is_absent_from_indexes() {
-        let db_folder = temp_db_folder("forced_reorg_stale_block_absent");
+    fn rewind_from_blue_score_prunes_derived_state_without_a_removed_block_index() {
+        let db_folder = temp_db_folder("rewind_without_removed_block_index");
         let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
         let counters = Arc::new(Counters::default());
         let processor = Processor::new(db.clone(), counters, None, None);
 
-        let stale_block = RpcHash::from_le_u64([0x91, 0x92, 0x93, 0x94]);
         let later_block = RpcHash::from_le_u64([0xA1, 0xA2, 0xA3, 0xA4]);
         let stale_score = 1_000;
         let later_score = 1_001;
@@ -2230,14 +2763,15 @@ mod tests {
             wtx.commit().unwrap().expect("seed commit");
         }
 
-        {
-            let mut wtx = db.write_tx();
-            let diff = processor
-                .process_removal(&mut wtx, &[stale_block], Some(stale_score))
-                .unwrap();
-            assert_eq!(diff.transfers, 1);
-            wtx.commit().unwrap().expect("reorg commit");
-        }
+        assert!(matches!(
+            processor.rewind_from_blue_score(later_score + 1),
+            Err(Error::RewindBeyondTip { .. })
+        ));
+        assert!(processor
+            .accepted_block_before(later_score)
+            .unwrap()
+            .is_none());
+        processor.rewind_from_blue_score(stale_score).unwrap();
 
         let rtx = db.read_tx();
         assert!(db
@@ -2258,6 +2792,104 @@ mod tests {
             .is_none());
 
         drop(rtx);
+        let _ = std::fs::remove_dir_all(&db_folder);
+    }
+
+    #[test]
+    fn same_score_mints_rollback_in_reverse_sequence_and_replay_identically() {
+        let db_folder = temp_db_folder("same_score_mint_sequence_rollback");
+        let db = Arc::new(Db::try_open(&db_folder, &Network::Testnet10).unwrap());
+        let counters = Arc::new(Counters::default());
+        let processor = Processor::new(db.clone(), counters, None, None);
+        let tick = Tick::from_str("REPLAYNFT").unwrap();
+        let owner = dummy_pubkey_spk(0xAB);
+        let score = calculate_tx_score_from_blue(1_000);
+        let entropy = 4;
+        let max_supply = NonZeroU64::new(10).unwrap();
+        let mut original_token_ids = Vec::new();
+
+        {
+            let mut wtx = db.write_tx();
+            for seq in 1..=3 {
+                let token_id = processor
+                    .generate_token_id(&mut wtx, &tick, entropy, max_supply, 0)
+                    .unwrap()
+                    .get();
+                original_token_ids.push(token_id);
+                db.mint_history
+                    .insert_wtx(
+                        &mut wtx,
+                        MintHistoryKey::with_seq(tick, seq, token_id, score),
+                        &(),
+                    )
+                    .unwrap();
+                db.ownership_changes
+                    .insert_wtx(
+                        &mut wtx,
+                        TokenMintsKey::with_seq(score, tick, token_id, seq),
+                        &(),
+                    )
+                    .unwrap();
+                db.ownership_history
+                    .insert_wtx(
+                        &mut wtx,
+                        OwnershipHistoryKey::with_score(tick, token_id, score),
+                        &owner,
+                    )
+                    .unwrap();
+            }
+            wtx.commit().unwrap().expect("seed commit");
+        }
+        assert_eq!(original_token_ids, vec![5, 1, 3]);
+
+        {
+            let mut wtx = db.write_tx();
+            let affected = processor
+                .get_affected_token_operations(&mut wtx, score, AHashMap::from_iter([(tick, 0)]))
+                .unwrap();
+            assert_eq!(affected.len(), original_token_ids.len());
+            wtx.commit().unwrap().expect("rollback commit");
+        }
+
+        {
+            let rtx = db.read_tx();
+            assert!(db.range_lengths.get_rtx(&rtx, &tick).unwrap().is_none());
+            assert!(db
+                .mint_history
+                .last_minted_token_seq_no_rtx(&rtx, &tick)
+                .unwrap()
+                .is_none());
+            for token_id in &original_token_ids {
+                assert!(db
+                    .token_id_meta
+                    .get_rtx(
+                        &rtx,
+                        &TokenMetaKey {
+                            tick,
+                            token_id: *token_id,
+                        },
+                    )
+                    .unwrap()
+                    .is_none());
+            }
+        }
+
+        let replayed_token_ids = {
+            let mut wtx = db.write_tx();
+            let token_ids = (0..original_token_ids.len())
+                .map(|_| {
+                    processor
+                        .generate_token_id(&mut wtx, &tick, entropy, max_supply, 0)
+                        .unwrap()
+                        .get()
+                })
+                .collect::<Vec<_>>();
+            wtx.commit().unwrap().expect("replay commit");
+            token_ids
+        };
+        assert_eq!(replayed_token_ids, original_token_ids);
+
+        drop(db);
         let _ = std::fs::remove_dir_all(&db_folder);
     }
 
